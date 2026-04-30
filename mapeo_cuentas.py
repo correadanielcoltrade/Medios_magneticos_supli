@@ -151,7 +151,7 @@ def obtener_codigo_parametro_formulario(codigo_formulario, codigo_cuenta):
 
     coincidencias = [
         codigo_parametro for codigo_parametro in parametros
-        if codigo_cuenta.startswith(codigo_parametro)
+        if codigo_parametro and codigo_cuenta.startswith(str(codigo_parametro))
     ]
     if not coincidencias:
         return ''
