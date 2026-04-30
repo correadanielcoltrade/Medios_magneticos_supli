@@ -187,6 +187,9 @@ class ReportApp {
             .then(data => {
                 if (data.status === 'done') {
                     this.hideLoading();
+                    if (data.dataframe_id) {
+                        localStorage.setItem('dataframe_id', data.dataframe_id);
+                    }
                     this.setFileLoaded(data.file_name, data.file_size, data.resumen_formatos);
                     this.showSuccess(data.message, data.file_size);
                     return;
@@ -304,8 +307,9 @@ class ReportApp {
 
         // Realizar descarga
         const startTime = Date.now();
+        const dataframe_id = localStorage.getItem('dataframe_id') || '';
 
-        fetch(`/download/${codigo}`)
+        fetch(`/download/${codigo}?dataframe_id=${encodeURIComponent(dataframe_id)}`)
             .then(res => {
                 const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
                 console.log(`[DESCARGA] Respuesta recibida en ${elapsed}s, status: ${res.status}`);

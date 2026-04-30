@@ -386,6 +386,7 @@ def upload_status(job_id):
             'status': 'done',
             'message': job['message'],
             'file_name': job['file_name'],
+            'dataframe_id': job['dataframe_id'],
             'resumen_formatos': job['resumen_formatos'],
             'file_size': job['file_size']
         }), 200
@@ -436,10 +437,12 @@ def download(codigo_formato):
         print(f"\n{'='*80}")
         print(f"[DESCARGA] Iniciando generación de Formato {codigo_formato}")
         print(f"{'='*80}")
+        sys.stdout.flush()
 
-        # Validar que hay sesión con datos
-        dataframe_id = session.get('dataframe_id', '')
+        # Obtener dataframe_id del query parameter o sesión
+        dataframe_id = request.args.get('dataframe_id', '') or session.get('dataframe_id', '')
         print(f"[1/5] Validando sesión... dataframe_id={dataframe_id}")
+        sys.stdout.flush()
 
         if not dataframe_id:
             print(f"[ERROR] No hay dataframe_id en sesión")
