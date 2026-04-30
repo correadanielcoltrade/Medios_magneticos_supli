@@ -131,14 +131,23 @@ def upload():
             }), 400
 
         # Validar estructura
-        processor = DataProcessor(df)
-        valido, errores = processor.validar_estructura()
+        try:
+            processor = DataProcessor(df)
+            valido, errores = processor.validar_estructura()
 
-        if not valido:
+            if not valido:
+                return jsonify({
+                    'success': False,
+                    'message': 'Estructura inválida: ' + '; '.join(errores)
+                }), 400
+        except Exception as e:
+            print(f"[ERROR] DataProcessor initialization: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return jsonify({
                 'success': False,
-                'message': 'Estructura inválida: ' + '; '.join(errores)
-            }), 400
+                'message': f'Error al procesar datos: {str(e)}'
+            }), 500
 
         # Generar ID único para esta sesión y guardar DataFrame en archivo
         resumen_formatos = {

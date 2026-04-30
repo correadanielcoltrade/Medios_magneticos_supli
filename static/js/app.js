@@ -122,7 +122,12 @@ class ReportApp {
             method: 'POST',
             body: formData
         })
-            .then(res => res.json())
+            .then(res => {
+                if (!res.ok) {
+                    throw new Error(`Server error: ${res.status} ${res.statusText}`);
+                }
+                return res.json();
+            })
             .then(data => {
                 if (data.success) {
                     this.hideLoading();
