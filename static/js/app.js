@@ -93,6 +93,35 @@ class ReportApp {
         }
     }
 
+    parseJsonResponse(res) {
+        return res.text().then(text => {
+            let data = null;
+
+            if (text) {
+                try {
+                    data = JSON.parse(text);
+                } catch (error) {
+                    data = null;
+                }
+            }
+
+            if (!res.ok) {
+                const serverMessage = data && data.message ? data.message : this.buildHttpErrorMessage(res, text);
+                throw new Error(serverMessage);
+            }
+
+            return data || {};
+        });
+    }
+
+    buildHttpErrorMessage(res, text = '') {
+        const htmlResponse = text.trim().startsWith('<');
+        if (htmlResponse) {
+            return `El servidor devolvio una pagina de error (${res.status}). Espera unos segundos y vuelve a intentar; si se repite, revisa los logs de Render.`;
+        }
+        return `Error HTTP ${res.status}: ${res.statusText || 'respuesta no valida del servidor'}`;
+    }
+
     uploadFile(file) {
         // Validaciones iniciales
         if (!file.name.endsWith('.xlsx')) {
@@ -122,19 +151,14 @@ class ReportApp {
             method: 'POST',
             body: formData
         })
-            .then(res => {
-                if (!res.ok) {
-                    return res.json()
-                        .then(data => {
-                            throw new Error(data.message || `Error HTTP ${res.status}`);
-                        })
-                        .catch(err => {
-                            throw new Error(err.message || `Error HTTP ${res.status}: ${res.statusText}`);
-                        });
-                }
-                return res.json();
-            })
+            .then(res => this.parseJsonResponse(res))
             .then(data => {
+                if (data.processing && data.job_id) {
+                    this.updateLoadingMessage(data.message || 'Procesando archivo...');
+                    this.pollUploadStatus(data.job_id);
+                    return;
+                }
+
                 if (data.success) {
                     this.hideLoading();
                     this.setFileLoaded(data.file_name, data.file_size, data.resumen_formatos);
@@ -148,6 +172,39 @@ class ReportApp {
                 this.hideLoading();
                 this.showError('❌ Error al procesar el archivo: ' + err.message);
                 console.error('Upload error:', err);
+            });
+    }
+
+    pollUploadStatus(jobId, attempt = 0) {
+        if (attempt > 180) {
+            this.hideLoading();
+            this.showError('Error al procesar el archivo: el servidor tardo demasiado en responder. Intenta con un archivo mas pequeno o vuelve a cargarlo.');
+            return;
+        }
+
+        fetch(`/upload-status/${jobId}`, { cache: 'no-store' })
+            .then(res => this.parseJsonResponse(res))
+            .then(data => {
+                if (data.status === 'done') {
+                    this.hideLoading();
+                    this.setFileLoaded(data.file_name, data.file_size, data.resumen_formatos);
+                    this.showSuccess(data.message, data.file_size);
+                    return;
+                }
+
+                if (data.status === 'error' || data.success === false) {
+                    this.hideLoading();
+                    this.showError('Error al procesar el archivo: ' + (data.message || 'No se pudo completar el procesamiento.'));
+                    return;
+                }
+
+                this.updateLoadingMessage(data.message || 'Procesando archivo...');
+                setTimeout(() => this.pollUploadStatus(jobId, attempt + 1), 1000);
+            })
+            .catch(err => {
+                this.hideLoading();
+                this.showError('Error al consultar el procesamiento: ' + err.message);
+                console.error('Upload status error:', err);
             });
     }
 
@@ -254,11 +311,7 @@ class ReportApp {
                 console.log(`[DESCARGA] Respuesta recibida en ${elapsed}s, status: ${res.status}`);
 
                 if (!res.ok) {
-                    return res.json().then(data => {
-                        throw new Error(data.message || `Error HTTP ${res.status}`);
-                    }).catch(err => {
-                        throw new Error(`Error HTTP ${res.status}: ${res.statusText}`);
-                    });
+                    return this.parseJsonResponse(res);
                 }
 
                 this.showDownloadProgress(codigo, 50);
@@ -389,10 +442,18 @@ class ReportApp {
 
     showLoading() {
         this.loadingIndicator.classList.remove('d-none');
+        this.updateLoadingMessage('Procesando archivo...');
     }
 
     hideLoading() {
         this.loadingIndicator.classList.add('d-none');
+    }
+
+    updateLoadingMessage(message) {
+        const text = this.loadingIndicator.querySelector('span:not(.visually-hidden)');
+        if (text) {
+            text.textContent = message;
+        }
     }
 
     showError(message) {

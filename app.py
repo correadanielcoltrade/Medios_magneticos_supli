@@ -11,6 +11,8 @@ import atexit
 import glob
 import tempfile
 import traceback
+import threading
+import time
 
 # Agregar módulos al path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -33,14 +35,129 @@ UPLOAD_FOLDER = os.environ.get(
     os.path.join(BASE_DIR, 'temp') if not IS_PRODUCTION else tempfile.gettempdir()
 )
 DATAFRAME_FOLDER = os.path.join(UPLOAD_FOLDER, 'dataframes')
+UPLOAD_JOB_FOLDER = os.path.join(UPLOAD_FOLDER, 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(DATAFRAME_FOLDER, exist_ok=True)
+os.makedirs(UPLOAD_JOB_FOLDER, exist_ok=True)
+
+UPLOAD_JOBS = {}
+UPLOAD_JOBS_LOCK = threading.Lock()
+UPLOAD_JOB_TTL_SECONDS = 60 * 60
 
 
 def log_exception(context, exc):
     """Imprime errores con traceback para que Render/Gunicorn los guarde en logs."""
     print(f"[ERROR] {context}: {str(exc)}")
     traceback.print_exc()
+
+
+def set_upload_job(job_id, **changes):
+    with UPLOAD_JOBS_LOCK:
+        job = UPLOAD_JOBS.setdefault(job_id, {})
+        job.update(changes)
+        job['updated_at'] = time.time()
+
+
+def get_upload_job(job_id):
+    with UPLOAD_JOBS_LOCK:
+        job = UPLOAD_JOBS.get(job_id)
+        return job.copy() if job else None
+
+
+def cleanup_upload_jobs():
+    now = time.time()
+    expired_paths = []
+    with UPLOAD_JOBS_LOCK:
+        expired_ids = [
+            job_id for job_id, job in UPLOAD_JOBS.items()
+            if now - job.get('updated_at', now) > UPLOAD_JOB_TTL_SECONDS
+        ]
+        for job_id in expired_ids:
+            job = UPLOAD_JOBS.pop(job_id, {})
+            upload_path = job.get('upload_path')
+            if upload_path:
+                expired_paths.append(upload_path)
+
+    for upload_path in expired_paths:
+        try:
+            if os.path.exists(upload_path):
+                os.remove(upload_path)
+        except OSError:
+            pass
+
+
+def process_upload_job(job_id, upload_path, original_filename):
+    try:
+        set_upload_job(job_id, status='processing', message='Leyendo archivo Excel...')
+
+        try:
+            df = pd.read_excel(upload_path, sheet_name=0)
+        except Exception as e:
+            set_upload_job(job_id, status='error', message=f'Error al leer el archivo: {str(e)}')
+            return
+
+        set_upload_job(job_id, message='Validando estructura...')
+        try:
+            processor = DataProcessor(df)
+            valido, errores = processor.validar_estructura()
+            if not valido:
+                set_upload_job(
+                    job_id,
+                    status='error',
+                    message='Estructura inválida: ' + '; '.join(errores)
+                )
+                return
+        except Exception as e:
+            log_exception('DataProcessor initialization', e)
+            set_upload_job(job_id, status='error', message=f'Error al procesar datos: {str(e)}')
+            return
+
+        set_upload_job(job_id, message='Calculando resumen de formatos...')
+        try:
+            resumen_formatos = {
+                codigo: processor.obtener_resumen_formato(codigo)
+                for codigo in FORMATOS_DISPONIBLES
+            }
+        except Exception as e:
+            log_exception('Resumen de formatos', e)
+            set_upload_job(
+                job_id,
+                status='error',
+                message=f'Error al calcular el resumen de formatos: {str(e)}'
+            )
+            return
+
+        dataframe_id = str(uuid.uuid4())
+        dataframe_path = os.path.join(DATAFRAME_FOLDER, f'{dataframe_id}.pkl')
+
+        set_upload_job(job_id, message='Guardando datos temporales...')
+        try:
+            with open(dataframe_path, 'wb') as f:
+                pickle.dump(df, f)
+        except Exception as e:
+            log_exception('Guardar DataFrame temporal', e)
+            set_upload_job(job_id, status='error', message=f'Error al guardar datos: {str(e)}')
+            return
+
+        set_upload_job(
+            job_id,
+            status='done',
+            message=f'Archivo "{original_filename}" cargado correctamente',
+            dataframe_id=dataframe_id,
+            file_name=secure_filename(original_filename),
+            resumen_formatos=resumen_formatos,
+            file_size=f"{len(df)} filas × {len(df.columns)} columnas",
+        )
+
+    except Exception as e:
+        log_exception('Upload job inesperado', e)
+        set_upload_job(job_id, status='error', message=f'Error inesperado: {str(e)}')
+    finally:
+        try:
+            if os.path.exists(upload_path):
+                os.remove(upload_path)
+        except OSError:
+            pass
 
 
 def limpiar_archivos_temp():
@@ -111,6 +228,7 @@ def upload():
     Retorna JSON con estado de la carga
     """
     try:
+        cleanup_upload_jobs()
         # Validar que hay archivo
         if 'file' not in request.files:
             return jsonify({'success': False, 'message': 'No se envió archivo'}), 400
@@ -133,6 +251,41 @@ def upload():
                 'success': False,
                 'message': 'El archivo debe contener "balance" en el nombre'
             }), 400
+
+        job_id = str(uuid.uuid4())
+        safe_name = secure_filename(file.filename)
+        upload_path = os.path.join(UPLOAD_JOB_FOLDER, f'{job_id}_{safe_name}')
+
+        try:
+            file.save(upload_path)
+        except Exception as e:
+            log_exception('Guardar upload temporal', e)
+            return jsonify({
+                'success': False,
+                'message': f'Error al guardar el archivo temporal: {str(e)}'
+            }), 500
+
+        set_upload_job(
+            job_id,
+            status='queued',
+            message='Archivo recibido. Iniciando procesamiento...',
+            upload_path=upload_path,
+            file_name=safe_name,
+        )
+
+        thread = threading.Thread(
+            target=process_upload_job,
+            args=(job_id, upload_path, file.filename),
+            daemon=True
+        )
+        thread.start()
+
+        return jsonify({
+            'success': True,
+            'processing': True,
+            'job_id': job_id,
+            'message': 'Archivo recibido. Estamos procesándolo...'
+        }), 202
 
         # Leer el Excel
         try:
@@ -207,6 +360,49 @@ def upload():
             'success': False,
             'message': f'Error inesperado: {str(e)}'
         }), 500
+
+
+@app.route('/upload-status/<job_id>', methods=['GET'])
+def upload_status(job_id):
+    """Retorna el estado del procesamiento de un archivo cargado."""
+    job = get_upload_job(job_id)
+    if not job:
+        return jsonify({
+            'success': False,
+            'status': 'missing',
+            'message': 'No se encontró el procesamiento. Intenta cargar el archivo nuevamente.'
+        }), 404
+
+    status_value = job.get('status', 'queued')
+    if status_value == 'done':
+        session['dataframe_id'] = job['dataframe_id']
+        session['file_name'] = job['file_name']
+        session['upload_time'] = datetime.now().isoformat()
+        session['resumen_formatos'] = job['resumen_formatos']
+        session.modified = True
+
+        return jsonify({
+            'success': True,
+            'status': 'done',
+            'message': job['message'],
+            'file_name': job['file_name'],
+            'resumen_formatos': job['resumen_formatos'],
+            'file_size': job['file_size']
+        }), 200
+
+    if status_value == 'error':
+        return jsonify({
+            'success': False,
+            'status': 'error',
+            'message': job.get('message', 'No se pudo procesar el archivo.')
+        }), 200
+
+    return jsonify({
+        'success': True,
+        'processing': True,
+        'status': status_value,
+        'message': job.get('message', 'Procesando archivo...')
+    }), 200
 
 
 @app.route('/status', methods=['GET'])
