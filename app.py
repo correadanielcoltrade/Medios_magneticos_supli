@@ -8,7 +8,6 @@ from datetime import datetime
 import json
 import uuid
 import pickle
-import atexit
 import glob
 import tempfile
 import traceback
@@ -181,7 +180,9 @@ def limpiar_archivos_temp():
             pass
 
 
-atexit.register(limpiar_archivos_temp)
+# No registrar limpieza global con atexit en produccion: si Gunicorn/Render
+# reinicia un worker por timeout, borrar todos los .pkl invalida las descargas
+# pendientes que el navegador aun referencia por dataframe_id.
 
 FORMATOS_DISPONIBLES = {
     '1001': {

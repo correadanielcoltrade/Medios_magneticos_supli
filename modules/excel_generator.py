@@ -172,6 +172,31 @@ class ExcelGenerator:
         for col_letter, width in anchos.items():
             self.ws.column_dimensions[col_letter].width = width
 
+    def _generar_excel_formato_1007(self):
+        columnas = list(self.df_datos.columns)
+        self._aplicar_estilos_header(1, columnas)
+        self.ws.row_dimensions[1].height = 32
+        self.ws.freeze_panes = 'A2'
+
+        for r_idx, row in enumerate(dataframe_to_rows(self.df_datos, index=False, header=False), 2):
+            for c_idx, value in enumerate(row, 1):
+                cell = self.ws.cell(row=r_idx, column=c_idx)
+                cell.value = value
+                if c_idx in (12, 13):
+                    cell.number_format = '#,##0.00'
+                    cell.alignment = Alignment(horizontal='right')
+
+        self.ws.auto_filter.ref = self.ws.dimensions
+        self._aplicar_anchos_formato_1007()
+
+    def _aplicar_anchos_formato_1007(self):
+        anchos = {
+            'A': 12, 'B': 22, 'C': 34, 'D': 16, 'E': 24, 'F': 22, 'G': 22,
+            'H': 22, 'I': 24, 'J': 36, 'K': 12, 'L': 24, 'M': 32
+        }
+        for col_letter, width in anchos.items():
+            self.ws.column_dimensions[col_letter].width = width
+
     def _generar_excel_formato_1008(self):
         columnas = list(self.df_datos.columns)
         self._aplicar_estilos_header(1, columnas)
@@ -284,6 +309,8 @@ class ExcelGenerator:
             self._generar_excel_formato_1005()
         elif self.codigo_formato == '1006':
             self._generar_excel_formato_1006()
+        elif self.codigo_formato == '1007':
+            self._generar_excel_formato_1007()
         elif self.codigo_formato == '1008':
             self._generar_excel_formato_1008()
         elif self.codigo_formato == '1009':
