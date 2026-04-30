@@ -433,29 +433,29 @@ def download(codigo_formato):
     Args:
         codigo_formato: '1001', '1005', etc.
     """
+    print(f"\n{'='*80}", flush=True)
+    print(f"[DESCARGA INICIO] Formato={codigo_formato}, Args={request.args}", flush=True)
+    print(f"{'='*80}", flush=True)
+
     try:
-        print(f"\n{'='*80}")
-        print(f"[DESCARGA] Iniciando generación de Formato {codigo_formato}")
-        print(f"{'='*80}")
-        sys.stdout.flush()
+        print(f"[DESCARGA] Iniciando generación de Formato {codigo_formato}", flush=True)
 
         # Obtener dataframe_id del query parameter o sesión
         dataframe_id = request.args.get('dataframe_id', '') or session.get('dataframe_id', '')
-        print(f"[1/5] Validando sesión... dataframe_id={dataframe_id}")
-        sys.stdout.flush()
+        print(f"[1/5] dataframe_id={dataframe_id}", flush=True)
 
         if not dataframe_id:
-            print(f"[ERROR] No hay dataframe_id en sesión")
+            print(f"[ERROR] No hay dataframe_id", flush=True)
             return jsonify({
                 'success': False,
                 'message': 'No hay archivo cargado. Por favor carga el archivo de balance primero.'
             }), 400
 
         dataframe_path = os.path.join(DATAFRAME_FOLDER, f'{dataframe_id}.pkl')
-        print(f"[2/5] Verificando archivo... {dataframe_path}")
+        print(f"[2/5] Verificando {dataframe_path}", flush=True)
 
         if not os.path.exists(dataframe_path):
-            print(f"[ERROR] Archivo no encontrado: {dataframe_path}")
+            print(f"[ERROR] Archivo no existe: {dataframe_path}", flush=True)
             return jsonify({
                 'success': False,
                 'message': 'Archivo de datos no encontrado. Por favor carga el archivo nuevamente.'
@@ -463,34 +463,35 @@ def download(codigo_formato):
 
         # Validar formato
         if codigo_formato not in FORMATOS_DISPONIBLES:
-            print(f"[ERROR] Formato inválido: {codigo_formato}")
+            print(f"[ERROR] Formato inválido: {codigo_formato}", flush=True)
             return jsonify({
                 'success': False,
                 'message': f'Formato {codigo_formato} no válido'
             }), 400
 
         # Cargar DataFrame desde archivo temporal
-        print(f"[3/5] Cargando DataFrame desde {dataframe_path}...")
+        print(f"[3/5] Cargando pickle...", flush=True)
         try:
             with open(dataframe_path, 'rb') as f:
                 df = pickle.load(f)
-            print(f"[3/5] DataFrame cargado: {len(df)} filas, {len(df.columns)} columnas")
+            print(f"[3/5] OK: {len(df)} filas", flush=True)
         except Exception as e:
-            print(f"[ERROR] No se pudo cargar DataFrame: {str(e)}")
+            print(f"[ERROR PICKLE] {str(e)}", flush=True)
+            traceback.print_exc()
             return jsonify({
                 'success': False,
                 'message': f'Error al cargar datos: {str(e)}'
             }), 400
 
         # Procesar datos según formato
-        print(f"[4/5] Procesando datos para formato {codigo_formato}...")
+        print(f"[4/5] Procesando {codigo_formato}...", flush=True)
         try:
             processor = DataProcessor(df)
 
             # Validar estructura
             valido, errores = processor.validar_estructura()
             if not valido:
-                print(f"[ERROR] Estructura inválida: {errores}")
+                print(f"[ERROR] Estructura inválida", flush=True)
                 return jsonify({
                     'success': False,
                     'message': f'Estructura inválida: {"; ".join(errores)}'
@@ -499,16 +500,15 @@ def download(codigo_formato):
             df_formato = processor.procesar_formato(codigo_formato)
 
             if df_formato.empty:
-                print(f"[WARNING] No se encontraron datos para el patrón de {codigo_formato}")
+                print(f"[WARNING] Sin datos para {codigo_formato}", flush=True)
                 return jsonify({
                     'success': False,
                     'message': f'No se encontraron datos para el formato {codigo_formato}. Verifica que el archivo contiene cuentas de este formato.'
                 }), 400
 
-            print(f"[4/5] Datos procesados: {len(df_formato)} filas (incluyendo totales)")
+            print(f"[4/5] OK: {len(df_formato)} filas", flush=True)
         except Exception as e:
-            print(f"[ERROR] Error al procesar formato: {str(e)}")
-            import traceback
+            print(f"[ERROR PROCESO] {str(e)}", flush=True)
             traceback.print_exc()
             return jsonify({
                 'success': False,
