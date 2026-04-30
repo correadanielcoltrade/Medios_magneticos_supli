@@ -1067,6 +1067,7 @@ class DataProcessor:
 
         col_codigo = self.columnas['codigo']
         col_cuenta = self.columnas['cuenta']
+        col_nit = self.columnas['nit']
 
         print(f"[4/5] Procesando datos para formato {codigo_formato}...")
 

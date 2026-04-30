@@ -124,7 +124,13 @@ class ReportApp {
         })
             .then(res => {
                 if (!res.ok) {
-                    throw new Error(`Server error: ${res.status} ${res.statusText}`);
+                    return res.json()
+                        .then(data => {
+                            throw new Error(data.message || `Error HTTP ${res.status}`);
+                        })
+                        .catch(err => {
+                            throw new Error(err.message || `Error HTTP ${res.status}: ${res.statusText}`);
+                        });
                 }
                 return res.json();
             })

@@ -9,6 +9,8 @@ import uuid
 import pickle
 import atexit
 import glob
+import tempfile
+import traceback
 
 # Agregar módulos al path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -24,10 +26,21 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True
 
 # Configuración de carga
 ALLOWED_EXTENSIONS = {'xlsx'}
-UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'temp')
-DATAFRAME_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'temp', 'dataframes')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production'
+UPLOAD_FOLDER = os.environ.get(
+    'APP_TEMP_DIR',
+    os.path.join(BASE_DIR, 'temp') if not IS_PRODUCTION else tempfile.gettempdir()
+)
+DATAFRAME_FOLDER = os.path.join(UPLOAD_FOLDER, 'dataframes')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(DATAFRAME_FOLDER, exist_ok=True)
+
+
+def log_exception(context, exc):
+    """Imprime errores con traceback para que Render/Gunicorn los guarde en logs."""
+    print(f"[ERROR] {context}: {str(exc)}")
+    traceback.print_exc()
 
 
 def limpiar_archivos_temp():
@@ -141,19 +154,24 @@ def upload():
                     'message': 'Estructura inválida: ' + '; '.join(errores)
                 }), 400
         except Exception as e:
-            print(f"[ERROR] DataProcessor initialization: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            log_exception('DataProcessor initialization', e)
             return jsonify({
                 'success': False,
                 'message': f'Error al procesar datos: {str(e)}'
             }), 500
 
         # Generar ID único para esta sesión y guardar DataFrame en archivo
-        resumen_formatos = {
-            codigo: processor.obtener_resumen_formato(codigo)
-            for codigo in FORMATOS_DISPONIBLES
-        }
+        try:
+            resumen_formatos = {
+                codigo: processor.obtener_resumen_formato(codigo)
+                for codigo in FORMATOS_DISPONIBLES
+            }
+        except Exception as e:
+            log_exception('Resumen de formatos', e)
+            return jsonify({
+                'success': False,
+                'message': f'Error al calcular el resumen de formatos: {str(e)}'
+            }), 500
 
         dataframe_id = str(uuid.uuid4())
         dataframe_path = os.path.join(DATAFRAME_FOLDER, f'{dataframe_id}.pkl')
@@ -162,6 +180,7 @@ def upload():
             with open(dataframe_path, 'wb') as f:
                 pickle.dump(df, f)
         except Exception as e:
+            log_exception('Guardar DataFrame temporal', e)
             return jsonify({
                 'success': False,
                 'message': f'Error al guardar datos: {str(e)}'
@@ -183,6 +202,7 @@ def upload():
         }), 200
 
     except Exception as e:
+        log_exception('Upload inesperado', e)
         return jsonify({
             'success': False,
             'message': f'Error inesperado: {str(e)}'
