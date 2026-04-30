@@ -514,28 +514,42 @@ def download(codigo_formato):
 
         # Generar Excel
         print(f"[5/5] Generando Excel...")
-        excel_gen = ExcelGenerator(codigo_formato, df_formato, 'COLTRADE', 2025)
-        archivo = excel_gen.generar_excel()
-        nombre_archivo = excel_gen.obtener_nombre_archivo()
-        tamaño_kb = len(archivo.getvalue()) / 1024
+        sys.stdout.flush()
+        try:
+            excel_gen = ExcelGenerator(codigo_formato, df_formato, 'COLTRADE', 2025)
+            print(f"[5/5] ExcelGenerator creado")
+            sys.stdout.flush()
 
-        print(f"[5/5] Excel generado: {nombre_archivo} ({tamaño_kb:.2f} KB)")
-        print(f"[EXITO] Reporte {codigo_formato} generado correctamente")
-        print(f"{'='*80}\n")
+            archivo = excel_gen.generar_excel()
+            print(f"[5/5] Excel generado en memoria")
+            sys.stdout.flush()
 
-        # Enviar archivo
-        return send_file(
-            archivo,
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            as_attachment=True,
-            download_name=nombre_archivo
-        )
+            nombre_archivo = excel_gen.obtener_nombre_archivo()
+            tamaño_kb = len(archivo.getvalue()) / 1024
+
+            print(f"[5/5] Excel generado: {nombre_archivo} ({tamaño_kb:.2f} KB)")
+            print(f"[EXITO] Reporte {codigo_formato} generado correctamente")
+            print(f"{'='*80}\n")
+            sys.stdout.flush()
+
+            # Enviar archivo
+            return send_file(
+                archivo,
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                as_attachment=True,
+                download_name=nombre_archivo
+            )
+        except Exception as e:
+            print(f"[ERROR EXCEL] Error generando Excel para {codigo_formato}: {str(e)}")
+            traceback.print_exc()
+            sys.stdout.flush()
+            raise
 
     except Exception as e:
         print(f"[ERROR CRITICO] {str(e)}")
-        import traceback
         traceback.print_exc()
         print(f"{'='*80}\n")
+        sys.stdout.flush()
 
         return jsonify({
             'success': False,
