@@ -2,6 +2,7 @@ from io import BytesIO
 from datetime import datetime
 
 from openpyxl import Workbook
+from openpyxl.cell import WriteOnlyCell
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.dataframe import dataframe_to_rows
@@ -102,16 +103,39 @@ class ExcelGenerator:
 
     def _generar_excel_formato_1001(self):
         columnas = list(self.df_datos.columns)
-        self._aplicar_estilos_header(1, columnas)
-        self.ws.row_dimensions[1].height = 28
+        self.wb = Workbook(write_only=True)
+        self.ws = self.wb.create_sheet(title=f"Formato {self.codigo_formato}")
         self.ws.freeze_panes = 'A2'
-
-        for r_idx, row in enumerate(dataframe_to_rows(self.df_datos, index=False, header=False), 2):
-            for c_idx, value in enumerate(row, 1):
-                self.ws.cell(row=r_idx, column=c_idx).value = value
-
-        self.ws.auto_filter.ref = self.ws.dimensions
+        last_col = get_column_letter(len(columnas))
+        self.ws.auto_filter.ref = f"A1:{last_col}{len(self.df_datos) + 1}"
         self._aplicar_anchos_formato_1001()
+
+        fill = PatternFill(start_color=self.COLORS['header'], end_color=self.COLORS['header'], fill_type='solid')
+        font = Font(
+            size=self.FUENTES_CONFIG['header']['size'],
+            bold=self.FUENTES_CONFIG['header']['bold'],
+            color=self.FUENTES_CONFIG['header']['color']
+        )
+        border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+        header = []
+        for col_name in columnas:
+            cell = WriteOnlyCell(self.ws, value=col_name)
+            cell.fill = fill
+            cell.font = font
+            cell.border = border
+            cell.alignment = alignment
+            header.append(cell)
+        self.ws.append(header)
+
+        for row in self.df_datos.itertuples(index=False, name=None):
+            self.ws.append(row)
 
     def _aplicar_anchos_formato_1001(self):
         anchos = {
