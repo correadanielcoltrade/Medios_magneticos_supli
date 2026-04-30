@@ -1,5 +1,6 @@
 import os
 import sys
+import logging
 from flask import Flask, render_template, request, jsonify, send_file, session
 from werkzeug.utils import secure_filename
 import pandas as pd
@@ -13,6 +14,17 @@ import tempfile
 import traceback
 import threading
 import time
+
+# Configurar logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] [%(levelname)s] %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.StreamHandler(sys.stderr)
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Agregar módulos al path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -433,29 +445,25 @@ def download(codigo_formato):
     Args:
         codigo_formato: '1001', '1005', etc.
     """
-    print(f"\n{'='*80}", flush=True)
-    print(f"[DESCARGA INICIO] Formato={codigo_formato}, Args={request.args}", flush=True)
-    print(f"{'='*80}", flush=True)
+    logger.info(f"[DOWNLOAD START] Formato={codigo_formato}, Args={request.args}")
 
     try:
-        print(f"[DESCARGA] Iniciando generación de Formato {codigo_formato}", flush=True)
-
         # Obtener dataframe_id del query parameter o sesión
         dataframe_id = request.args.get('dataframe_id', '') or session.get('dataframe_id', '')
-        print(f"[1/5] dataframe_id={dataframe_id}", flush=True)
+        logger.info(f"[1/5] dataframe_id={dataframe_id}")
 
         if not dataframe_id:
-            print(f"[ERROR] No hay dataframe_id", flush=True)
+            logger.error(f"[ERROR] No dataframe_id found")
             return jsonify({
                 'success': False,
                 'message': 'No hay archivo cargado. Por favor carga el archivo de balance primero.'
             }), 400
 
         dataframe_path = os.path.join(DATAFRAME_FOLDER, f'{dataframe_id}.pkl')
-        print(f"[2/5] Verificando {dataframe_path}", flush=True)
+        logger.info(f"[2/5] Checking {dataframe_path}")
 
         if not os.path.exists(dataframe_path):
-            print(f"[ERROR] Archivo no existe: {dataframe_path}", flush=True)
+            logger.error(f"[ERROR] File not found: {dataframe_path}")
             return jsonify({
                 'success': False,
                 'message': 'Archivo de datos no encontrado. Por favor carga el archivo nuevamente.'
@@ -463,35 +471,34 @@ def download(codigo_formato):
 
         # Validar formato
         if codigo_formato not in FORMATOS_DISPONIBLES:
-            print(f"[ERROR] Formato inválido: {codigo_formato}", flush=True)
+            logger.error(f"[ERROR] Invalid format: {codigo_formato}")
             return jsonify({
                 'success': False,
                 'message': f'Formato {codigo_formato} no válido'
             }), 400
 
         # Cargar DataFrame desde archivo temporal
-        print(f"[3/5] Cargando pickle...", flush=True)
+        logger.info(f"[3/5] Loading pickle...")
         try:
             with open(dataframe_path, 'rb') as f:
                 df = pickle.load(f)
-            print(f"[3/5] OK: {len(df)} filas", flush=True)
+            logger.info(f"[3/5] OK: {len(df)} rows, {len(df.columns)} cols")
         except Exception as e:
-            print(f"[ERROR PICKLE] {str(e)}", flush=True)
-            traceback.print_exc()
+            logger.error(f"[ERROR PICKLE] {str(e)}", exc_info=True)
             return jsonify({
                 'success': False,
                 'message': f'Error al cargar datos: {str(e)}'
             }), 400
 
         # Procesar datos según formato
-        print(f"[4/5] Procesando {codigo_formato}...", flush=True)
+        logger.info(f"[4/5] Processing {codigo_formato}...")
         try:
             processor = DataProcessor(df)
 
             # Validar estructura
             valido, errores = processor.validar_estructura()
             if not valido:
-                print(f"[ERROR] Estructura inválida", flush=True)
+                logger.error(f"[ERROR] Invalid structure: {errores}")
                 return jsonify({
                     'success': False,
                     'message': f'Estructura inválida: {"; ".join(errores)}'
@@ -500,40 +507,33 @@ def download(codigo_formato):
             df_formato = processor.procesar_formato(codigo_formato)
 
             if df_formato.empty:
-                print(f"[WARNING] Sin datos para {codigo_formato}", flush=True)
+                logger.warning(f"[WARNING] No data for {codigo_formato}")
                 return jsonify({
                     'success': False,
                     'message': f'No se encontraron datos para el formato {codigo_formato}. Verifica que el archivo contiene cuentas de este formato.'
                 }), 400
 
-            print(f"[4/5] OK: {len(df_formato)} filas", flush=True)
+            logger.info(f"[4/5] OK: {len(df_formato)} rows processed")
         except Exception as e:
-            print(f"[ERROR PROCESO] {str(e)}", flush=True)
-            traceback.print_exc()
+            logger.error(f"[ERROR PROCESS] {str(e)}", exc_info=True)
             return jsonify({
                 'success': False,
                 'message': f'Error al procesar datos: {str(e)}'
             }), 400
 
         # Generar Excel
-        print(f"[5/5] Generando Excel...")
-        sys.stdout.flush()
+        logger.info(f"[5/5] Generating Excel...")
         try:
             excel_gen = ExcelGenerator(codigo_formato, df_formato, 'COLTRADE', 2025)
-            print(f"[5/5] ExcelGenerator creado")
-            sys.stdout.flush()
+            logger.info(f"[5/5] ExcelGenerator created")
 
             archivo = excel_gen.generar_excel()
-            print(f"[5/5] Excel generado en memoria")
-            sys.stdout.flush()
+            logger.info(f"[5/5] Excel in memory")
 
             nombre_archivo = excel_gen.obtener_nombre_archivo()
             tamaño_kb = len(archivo.getvalue()) / 1024
 
-            print(f"[5/5] Excel generado: {nombre_archivo} ({tamaño_kb:.2f} KB)")
-            print(f"[EXITO] Reporte {codigo_formato} generado correctamente")
-            print(f"{'='*80}\n")
-            sys.stdout.flush()
+            logger.info(f"[5/5] SUCCESS: {nombre_archivo} ({tamaño_kb:.2f} KB)")
 
             # Enviar archivo
             return send_file(
@@ -543,17 +543,11 @@ def download(codigo_formato):
                 download_name=nombre_archivo
             )
         except Exception as e:
-            print(f"[ERROR EXCEL] Error generando Excel para {codigo_formato}: {str(e)}")
-            traceback.print_exc()
-            sys.stdout.flush()
+            logger.error(f"[ERROR EXCEL] {str(e)}", exc_info=True)
             raise
 
     except Exception as e:
-        print(f"[ERROR CRITICO] {str(e)}")
-        traceback.print_exc()
-        print(f"{'='*80}\n")
-        sys.stdout.flush()
-
+        logger.error(f"[DOWNLOAD FAILED] {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
             'message': f'Error al generar el reporte: {str(e)}'
