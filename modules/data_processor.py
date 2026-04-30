@@ -375,10 +375,26 @@ class DataProcessor:
     def _cuenta_aplica_formulario(codigo_formulario, codigo_cuenta):
         return bool(obtener_codigo_parametro_formulario(codigo_formulario, codigo_cuenta))
 
+    @staticmethod
+    def _mapear_codigos_parametro(codigo_formulario, codigo_norm):
+        parametros = MAPEO_CUENTAS_FORMULARIO.get(codigo_formulario, {}).get('parametros', {})
+        codigos_parametro = set(parametros)
+        resultado = codigo_norm.where(codigo_norm.isin(codigos_parametro), '').astype('string')
+
+        pendientes = resultado.eq('')
+        for codigo_parametro in sorted(codigos_parametro, key=len, reverse=True):
+            if not pendientes.any():
+                break
+            coincide = codigo_norm[pendientes].str.startswith(str(codigo_parametro), na=False)
+            if coincide.any():
+                indices = coincide[coincide].index
+                resultado.loc[indices] = codigo_parametro
+                pendientes.loc[indices] = False
+
+        return resultado
+
     def _mascara_resumen_formato(self, codigo_formato, codigo_norm, debito, credito):
-        codigo_parametro = codigo_norm.map(
-            lambda codigo: obtener_codigo_parametro_formulario(codigo_formato, codigo)
-        )
+        codigo_parametro = self._mapear_codigos_parametro(codigo_formato, codigo_norm)
         mascara = codigo_parametro.ne('')
 
         if codigo_formato == '1001':
@@ -499,8 +515,9 @@ class DataProcessor:
             'credito': credito,
         })
 
-        df_1001['codigo_parametro'] = df_1001['codigo_normalizado'].map(
-            lambda codigo: obtener_codigo_parametro_formulario('1001', codigo)
+        df_1001['codigo_parametro'] = self._mapear_codigos_parametro(
+            '1001',
+            df_1001['codigo_normalizado']
         )
         df_1001 = df_1001[df_1001['codigo_parametro'].ne('')].copy()
         if df_1001.empty:
@@ -515,16 +532,19 @@ class DataProcessor:
         )
         df_1001['Descripción'] = df_1001['Descripción'].fillna(df_1001['descripcion_balance'])
 
-        df_1001['Tipo documento'] = df_1001.apply(
-            lambda row: self._inferir_tipo_documento(row['nit'], row['tercero']),
-            axis=1
-        )
+        tipos_documento = [
+            self._inferir_tipo_documento(nit_valor, tercero_valor)
+            for nit_valor, tercero_valor in zip(df_1001['nit'].tolist(), df_1001['tercero'].tolist())
+        ]
+        df_1001['Tipo documento'] = tipos_documento
         df_1001['Número identificación del informado'] = df_1001['nit']
 
-        nombres = df_1001.apply(
-            lambda row: self._dividir_nombre(row['Tipo documento'], row['tercero']),
-            axis=1,
-            result_type='expand'
+        nombres = pd.DataFrame(
+            [
+                self._dividir_nombre(tipo_doc, tercero_valor)
+                for tipo_doc, tercero_valor in zip(tipos_documento, df_1001['tercero'].tolist())
+            ],
+            index=df_1001.index
         )
         nombres.columns = [
             'Primer apellido del informado',
