@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador de Reportes - Medios Magnéticos COLTRADE</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container-fluid">
+            <div class="header-content">
+                <div class="logo-section">
+                    <div class="logo">📊</div>
+                    <div>
+                        <h1 class="app-title">Generador de Reportes</h1>
+                        <p class="app-subtitle">Medios Magnéticos Supli</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <div class="container-lg">
+            <!-- Section: Upload -->
+            <section class="upload-section">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <h2 class="section-title">Paso 1: Cargar Archivo de Balance</h2>
+                        <p class="section-subtitle">Selecciona el archivo "balance_de_sumas_y_saldos.xlsx"</p>
+
+                        <!-- Dropzone -->
+                        <div class="dropzone" id="dropzone">
+                            <div class="dropzone-content">
+                                <div class="dropzone-icon">📁</div>
+                                <h3>Arrastra tu archivo aquí</h3>
+                                <p>o</p>
+                                <label for="file-input" class="btn-upload">
+                                    Selecciona un archivo
+                                </label>
+                                <input
+                                    type="file"
+                                    id="file-input"
+                                    accept=".xlsx"
+                                    style="display: none;"
+                                >
+                                <p class="dropzone-hint">Formato aceptado: .xlsx | Tamaño máximo: 50MB</p>
+                            </div>
+                        </div>
+
+                        <!-- File Info -->
+                        <div id="file-info" class="file-info d-none">
+                            <div class="alert alert-success" role="alert">
+                                <strong>✓ Archivo cargado correctamente</strong>
+                                <p id="file-details" class="mb-0"></p>
+                                <div id="format-summary" class="format-summary d-none"></div>
+                            </div>
+                        </div>
+
+                        <!-- Error Message -->
+                        <div id="error-message" class="d-none"></div>
+
+                        <!-- Loading Indicator -->
+                        <div id="loading-indicator" class="loading d-none">
+                            <div class="spinner-border spinner-sm" role="status">
+                                <span class="visually-hidden">Cargando...</span>
+                            </div>
+                            <span>Procesando archivo...</span>
+                        </div>
+
+                        <!-- Clear Button -->
+                        <div id="clear-section" class="d-none mt-3">
+                            <button id="clear-btn" class="btn btn-outline-danger btn-sm">
+                                Cargar otro archivo
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Section: Reports -->
+            <section class="reports-section">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <h2 class="section-title">Paso 2: Descargar Reportes</h2>
+                        <p class="section-subtitle">Selecciona el formato que deseas descargar</p>
+
+                        <!-- Formats Grid -->
+                        <div class="formats-grid" id="formats-grid">
+                            {% for codigo, info in formatos.items() %}
+                            <div class="format-card" data-codigo="{{ codigo }}">
+                                <button class="format-btn" disabled>
+                                    <div class="format-icon">{{ info.icono }}</div>
+                                    <div class="format-name">{{ info.nombre }}</div>
+                                    <div class="format-description">{{ info.descripcion }}</div>
+                                    <div class="format-code">Código: {{ codigo }}</div>
+                                </button>
+                                <div class="format-loading d-none">
+                                    <div class="spinner-border spinner-sm" role="status">
+                                        <span class="visually-hidden">Generando...</span>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+
+                        <!-- Info Message -->
+                        <div class="info-message">
+                            <strong>💡 Nota:</strong> Los reportes se generan bajo demanda. Carga el archivo de balance primero para habilitar las descargas.
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container-fluid">
+            <div class="footer-content">
+                <p>&copy; 2024 COLTRADE SAS | Generador de Medios Magnéticos | Todos los derechos reservados</p>
+                <p class="footer-info">Los datos se procesan en memoria y no se almacenan en el servidor</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

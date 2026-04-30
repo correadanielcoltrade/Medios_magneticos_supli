@@ -1,0 +1,68 @@
+# Entorno Virtual
+venv/
+env/
+ENV/
+*.venv
+
+# Archivos de Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Flask
+instance/
+.webassets-cache
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Archivos temporales
+temp/
+tmp/
+*.tmp
+*.bak
+
+# Archivos de sesión
+.flask_session/
+
+# Sistema operativo
+Thumbs.db
+.DS_Store
+
+# Archivos de configuración local
+settings.local.json
+config.local.py
+
+# Archivos de usuario
+*.xlsx
+*.xls
+!balance_de_sumas_y_saldos_sample.xlsx
