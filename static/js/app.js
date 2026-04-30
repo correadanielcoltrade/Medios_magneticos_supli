@@ -309,6 +309,11 @@ class ReportApp {
         const startTime = Date.now();
         const dataframe_id = localStorage.getItem('dataframe_id') || '';
 
+        if (codigo === '1001') {
+            this.handleAsyncDownload(codigo, dataframe_id, card, btn, loading, startTime);
+            return;
+        }
+
         fetch(`/download/${codigo}?dataframe_id=${encodeURIComponent(dataframe_id)}`)
             .then(res => {
                 const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
@@ -361,6 +366,105 @@ class ReportApp {
                 this.showError('Error al descargar: ' + err.message);
                 console.error('[ERROR DESCARGA]', err);
             });
+    }
+
+    handleAsyncDownload(codigo, dataframe_id, card, btn, loading, startTime) {
+        fetch(`/download-job/${codigo}?dataframe_id=${encodeURIComponent(dataframe_id)}`, {
+            method: 'POST'
+        })
+            .then(res => this.parseJsonResponse(res))
+            .then(data => {
+                if (!data.job_id) {
+                    throw new Error('El servidor no devolvio un identificador de generacion');
+                }
+
+                this.showDownloadProgress(codigo, 10);
+                return this.waitForDownloadJob(codigo, data.job_id, startTime);
+            })
+            .then(job => {
+                this.showDownloadProgress(codigo, 85);
+                return fetch(`/download-job/file/${job.job_id}`)
+                    .then(res => {
+                        if (!res.ok) {
+                            return this.parseJsonResponse(res);
+                        }
+                        return res.blob();
+                    });
+            })
+            .then(blob => {
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+                console.log(`[DESCARGA] Blob recibido: ${(blob.size / 1024).toFixed(2)} KB en ${elapsed}s`);
+
+                if (!blob || blob.size === 0) {
+                    throw new Error('Archivo vacio recibido');
+                }
+
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `Formato_${codigo}_COLTRADE_2025.xlsx`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+
+                this.showDownloadProgress(codigo, 100);
+
+                setTimeout(() => {
+                    loading.classList.add('d-none');
+                    btn.disabled = false;
+                    const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
+                    this.showSuccess(`Reporte Formato ${codigo} descargado correctamente (${totalTime}s)`);
+                    console.log(`[DESCARGA] Completado en ${totalTime}s`);
+                }, 500);
+            })
+            .catch(err => {
+                loading.classList.add('d-none');
+                btn.disabled = false;
+                this.showError('Error al descargar: ' + err.message);
+                console.error('[ERROR DESCARGA]', err);
+            });
+    }
+
+    waitForDownloadJob(codigo, jobId, startTime) {
+        const maxAttempts = 120;
+        let attempts = 0;
+
+        return new Promise((resolve, reject) => {
+            const poll = () => {
+                attempts += 1;
+
+                fetch(`/download-job/status/${jobId}`)
+                    .then(res => this.parseJsonResponse(res))
+                    .then(data => {
+                        const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+                        console.log(`[DESCARGA] Estado job ${jobId}: ${data.status} (${elapsed}s)`);
+
+                        if (data.status === 'done') {
+                            resolve({ job_id: jobId });
+                            return;
+                        }
+
+                        if (data.status === 'error') {
+                            reject(new Error(data.message || 'Error generando el reporte'));
+                            return;
+                        }
+
+                        const progress = Math.min(80, 10 + attempts);
+                        this.showDownloadProgress(codigo, progress);
+
+                        if (attempts >= maxAttempts) {
+                            reject(new Error('La generacion del reporte esta tardando demasiado. Intenta nuevamente.'));
+                            return;
+                        }
+
+                        setTimeout(poll, 2000);
+                    })
+                    .catch(reject);
+            };
+
+            poll();
+        });
     }
 
     showDownloadProgress(codigo, percentage) {

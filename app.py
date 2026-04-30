@@ -47,13 +47,18 @@ UPLOAD_FOLDER = os.environ.get(
 )
 DATAFRAME_FOLDER = os.path.join(UPLOAD_FOLDER, 'dataframes')
 UPLOAD_JOB_FOLDER = os.path.join(UPLOAD_FOLDER, 'uploads')
+REPORT_JOB_FOLDER = os.path.join(UPLOAD_FOLDER, 'reports')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(DATAFRAME_FOLDER, exist_ok=True)
 os.makedirs(UPLOAD_JOB_FOLDER, exist_ok=True)
+os.makedirs(REPORT_JOB_FOLDER, exist_ok=True)
 
 UPLOAD_JOBS = {}
 UPLOAD_JOBS_LOCK = threading.Lock()
 UPLOAD_JOB_TTL_SECONDS = 60 * 60
+REPORT_JOBS = {}
+REPORT_JOBS_LOCK = threading.Lock()
+REPORT_JOB_TTL_SECONDS = 60 * 60
 
 
 def log_exception(context, exc):
@@ -73,6 +78,67 @@ def get_upload_job(job_id):
     with UPLOAD_JOBS_LOCK:
         job = UPLOAD_JOBS.get(job_id)
         return job.copy() if job else None
+
+
+def set_report_job(job_id, **changes):
+    with REPORT_JOBS_LOCK:
+        job = REPORT_JOBS.setdefault(job_id, {})
+        job.update(changes)
+        job['updated_at'] = time.time()
+
+
+def get_report_job(job_id):
+    with REPORT_JOBS_LOCK:
+        job = REPORT_JOBS.get(job_id)
+        return job.copy() if job else None
+
+
+def process_report_job(job_id, codigo_formato, dataframe_path):
+    try:
+        set_report_job(job_id, status='processing', message='Cargando datos...')
+
+        with open(dataframe_path, 'rb') as f:
+            df = pickle.load(f)
+
+        set_report_job(job_id, message='Procesando formato...')
+        processor = DataProcessor(df)
+        valido, errores = processor.validar_estructura()
+        if not valido:
+            set_report_job(
+                job_id,
+                status='error',
+                message=f'Estructura invÃ¡lida: {"; ".join(errores)}'
+            )
+            return
+
+        df_formato = processor.procesar_formato(codigo_formato)
+        if df_formato.empty:
+            set_report_job(
+                job_id,
+                status='error',
+                message=f'No se encontraron datos para el formato {codigo_formato}.'
+            )
+            return
+
+        set_report_job(job_id, message='Generando Excel...')
+        excel_gen = ExcelGenerator(codigo_formato, df_formato, 'COLTRADE', 2025)
+        archivo = excel_gen.generar_excel()
+        nombre_archivo = excel_gen.obtener_nombre_archivo()
+        report_path = os.path.join(REPORT_JOB_FOLDER, f'{job_id}.xlsx')
+
+        with open(report_path, 'wb') as f:
+            f.write(archivo.getvalue())
+
+        set_report_job(
+            job_id,
+            status='done',
+            message='Reporte listo para descargar',
+            file_path=report_path,
+            file_name=nombre_archivo,
+        )
+    except Exception as e:
+        logger.error(f"[REPORT JOB FAILED] {str(e)}", exc_info=True)
+        set_report_job(job_id, status='error', message=f'Error al generar reporte: {str(e)}')
 
 
 def cleanup_upload_jobs():
@@ -553,6 +619,104 @@ def download(codigo_formato):
             'success': False,
             'message': f'Error al generar el reporte: {str(e)}'
         }), 500
+
+
+@app.route('/download-job/<codigo_formato>', methods=['POST'])
+def start_download_job(codigo_formato):
+    """Inicia generacion asincrona para reportes pesados."""
+    try:
+        if codigo_formato != '1001':
+            return jsonify({
+                'success': False,
+                'message': 'La generacion asincrona solo esta habilitada para el formato 1001.'
+            }), 400
+
+        dataframe_id = request.args.get('dataframe_id', '') or session.get('dataframe_id', '')
+        if not dataframe_id:
+            return jsonify({
+                'success': False,
+                'message': 'No hay archivo cargado. Por favor carga el archivo de balance primero.'
+            }), 400
+
+        dataframe_path = os.path.join(DATAFRAME_FOLDER, f'{dataframe_id}.pkl')
+        if not os.path.exists(dataframe_path):
+            return jsonify({
+                'success': False,
+                'message': 'Archivo de datos no encontrado. Por favor carga el archivo nuevamente.'
+            }), 400
+
+        job_id = str(uuid.uuid4())
+        set_report_job(
+            job_id,
+            status='queued',
+            message='Reporte en cola...',
+            codigo_formato=codigo_formato,
+        )
+        thread = threading.Thread(
+            target=process_report_job,
+            args=(job_id, codigo_formato, dataframe_path),
+            daemon=True
+        )
+        thread.start()
+
+        return jsonify({
+            'success': True,
+            'job_id': job_id,
+            'message': 'Generacion del reporte iniciada'
+        }), 202
+    except Exception as e:
+        logger.error(f"[DOWNLOAD JOB START FAILED] {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'message': f'Error al iniciar generacion del reporte: {str(e)}'
+        }), 500
+
+
+@app.route('/download-job/status/<job_id>', methods=['GET'])
+def download_job_status(job_id):
+    job = get_report_job(job_id)
+    if not job:
+        return jsonify({
+            'success': False,
+            'message': 'Trabajo de descarga no encontrado. Intenta generar el reporte nuevamente.'
+        }), 404
+
+    return jsonify({
+        'success': True,
+        'status': job.get('status', 'queued'),
+        'message': job.get('message', ''),
+        'file_ready': job.get('status') == 'done',
+    }), 200
+
+
+@app.route('/download-job/file/<job_id>', methods=['GET'])
+def download_job_file(job_id):
+    job = get_report_job(job_id)
+    if not job:
+        return jsonify({
+            'success': False,
+            'message': 'Trabajo de descarga no encontrado. Intenta generar el reporte nuevamente.'
+        }), 404
+
+    if job.get('status') != 'done':
+        return jsonify({
+            'success': False,
+            'message': job.get('message', 'El reporte todavia se esta generando.')
+        }), 409
+
+    file_path = job.get('file_path', '')
+    if not file_path or not os.path.exists(file_path):
+        return jsonify({
+            'success': False,
+            'message': 'Archivo generado no encontrado. Intenta generar el reporte nuevamente.'
+        }), 404
+
+    return send_file(
+        file_path,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=job.get('file_name', f'Formato_1001_COLTRADE_2025.xlsx')
+    )
 
 
 @app.route('/debug', methods=['GET'])
