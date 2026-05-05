@@ -97,6 +97,19 @@ generador-medios-magneticos/
 | **1009** | Cuentas por Pagar | Obligaciones con proveedores |
 | **2276** | Rentas de Trabajo | Gastos de nómina |
 
+### Integración con Odoo
+
+Los formatos `1001`, `1008`, `1009` y `2276` pueden completar dirección, departamento, municipio y país desde el contacto de Odoo usando el NIT del tercero. Configura estas variables de entorno antes de generar reportes:
+
+```bash
+ODOO_URL=https://tuempresa.odoo.com
+ODOO_DB=tu_base_odoo
+ODOO_USER=usuario@empresa.com
+ODOO_API_KEY=api_key_generada_en_odoo
+```
+
+También puedes guardarlas en un archivo local `.env` en la raíz del proyecto. Ese archivo está excluido de Git.
+
 ## 📊 Estructura del Archivo de Balance
 
 El archivo `balance_de_sumas_y_saldos.xlsx` debe tener la siguiente estructura:

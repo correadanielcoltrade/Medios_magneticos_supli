@@ -5,6 +5,7 @@ from mapeo_cuentas import (
     obtener_codigo_parametro_formulario,
     obtener_mapa_formato_1001,
 )
+from modules.odoo_client import OdooContactProvider
 
 
 class DataProcessor:
@@ -214,6 +215,7 @@ class DataProcessor:
         '23700506', '23700507', '23700510', '23803001', '23803002',
         '23803003', '23803004', '23803005',
     }
+    CUENTAS_1001_EXCLUIR_SIN_DOCUMENTO = {'14350101', '14350102'}
 
     COLUMNAS_VALOR_2276 = COLUMNAS_FORMATO_2276[12:41]
     UBICACION_COLUMNAS_2276 = {
@@ -238,10 +240,15 @@ class DataProcessor:
         'UNION TEMPORAL',
     )
 
-    def __init__(self, df):
+    def __init__(self, df, contact_provider=None):
         self.df_original = df.copy()
         self.df = self._detectar_y_limpiar_headers(df)
         self._normalize_dataframe()
+        self.contact_provider = (
+            contact_provider
+            if contact_provider is not None
+            else OdooContactProvider.from_environment()
+        )
 
     def _detectar_y_limpiar_headers(self, df):
         """Limpia encabezados decorativos cuando el archivo no viene plano."""
@@ -284,7 +291,14 @@ class DataProcessor:
         )
         col_nit = self._buscar_columna(
             cols_lower,
-            lambda col: 'nit' in col or 'vat' in col or 'identificación' in col or 'identificacion' in col
+            lambda col: (
+                'nit' in col
+                or 'vat' in col
+                or 'identificación' in col
+                or 'identificacion' in col
+                or 'cédula' in col
+                or 'cedula' in col
+            )
         )
         col_tercero = self._buscar_columna(
             cols_lower,
@@ -353,8 +367,93 @@ class DataProcessor:
                 return self._serie_texto(columna)
         return pd.Series([''] * len(self.df), index=self.df.index, dtype='string')
 
+    def _contactos_odoo(self, nits):
+        columnas = ['direccion', 'dpto', 'municipio', 'pais']
+        datos_vacios = pd.DataFrame('', index=nits.index, columns=columnas, dtype='string')
+        if self.contact_provider is None:
+            return datos_vacios
+
+        nits_unicos = list(dict.fromkeys(nit for nit in nits.tolist() if self._limpiar_texto(nit)))
+        if not nits_unicos:
+            return datos_vacios
+
+        try:
+            contactos = self.contact_provider.obtener_contactos(nits_unicos)
+        except Exception as exc:
+            print(f"[ODOO] No fue posible consultar contactos: {exc}")
+            return datos_vacios
+
+        for idx, nit in nits.items():
+            contacto = contactos.get(str(nit), {}) or {}
+            for columna in columnas:
+                datos_vacios.at[idx, columna] = self._limpiar_texto(contacto.get(columna, ''))
+        return datos_vacios
+
+    def _enriquecer_ubicacion_contacto(self, df, direccion_col='direccion', dpto_col='dpto', municipio_col='municipio', pais_col='pais'):
+        datos_odoo = self._contactos_odoo(df['nit'])
+        mapeo = {
+            direccion_col: 'direccion',
+            dpto_col: 'dpto',
+            municipio_col: 'municipio',
+            pais_col: 'pais',
+        }
+        for columna_destino, columna_odoo in mapeo.items():
+            if columna_destino not in df.columns:
+                df[columna_destino] = ''
+            existente = df[columna_destino].astype('string').fillna('')
+            desde_odoo = datos_odoo[columna_odoo].astype('string').fillna('')
+            df[columna_destino] = existente.mask(desde_odoo.ne(''), desde_odoo)
+        return df
+
     def _mascara_nit_valido(self):
         return self._serie_nit_limpio().ne('')
+
+    def _valor_relevante_formato(self, codigo_formato, codigo_parametro, debito, credito):
+        if codigo_formato == '1005':
+            es_devolucion_venta = codigo_parametro.eq('24082001')
+            return debito.where(~es_devolucion_venta, credito)
+        if codigo_formato == '1006':
+            es_24080501 = codigo_parametro.eq('24080501')
+            es_24080503 = codigo_parametro.eq('24080503')
+            return credito.where(es_24080501, debito.where(es_24080503, 0.0))
+        if codigo_formato == '1007':
+            es_especial = codigo_parametro.isin({'41750501', '41750502', '41750503'})
+            return debito.where(es_especial, credito)
+        if codigo_formato == '2276':
+            usa_credito = codigo_parametro.isin(self.CUENTAS_2276_VALOR_CREDITO)
+            return debito.where(~usa_credito, credito)
+        if codigo_formato in {'1008', '1009'}:
+            return debito.abs() + credito.abs()
+        return debito
+
+    @staticmethod
+    def _mascara_con_tercero_para_valores(nit, tercero, valor_relevante):
+        sin_tercero_en_balance = nit.eq('') & tercero.eq('') & (valor_relevante != 0)
+        return ~sin_tercero_en_balance
+
+    def _mascara_formato_1001(self, codigo_parametro, debito, nit=None, tercero=None):
+        nit = self._serie_nit_limpio() if nit is None else nit
+        tercero = self._serie_texto(self.columnas['tercero']) if tercero is None else tercero
+        tipo_documento = pd.Series(
+            [
+                self._inferir_tipo_documento(nit_valor, tercero_valor)
+                for nit_valor, tercero_valor in zip(nit.tolist(), tercero.tolist())
+            ],
+            index=codigo_parametro.index,
+            dtype='string'
+        )
+
+        mascara = (
+            codigo_parametro.ne('')
+            & (nit.ne('') | (debito != 0))
+            & self._mascara_con_tercero_para_valores(nit, tercero, debito)
+        )
+        excluir_sin_documento = (
+            codigo_parametro.isin(self.CUENTAS_1001_EXCLUIR_SIN_DOCUMENTO)
+            & nit.eq('')
+            & tipo_documento.eq('')
+        )
+        return mascara & ~excluir_sin_documento
 
     def _serie_codigo_normalizado(self):
         codigo = self._serie_texto(self.columnas['codigo']).str.replace(r'\.0$', '', regex=True)
@@ -396,18 +495,26 @@ class DataProcessor:
     def _mascara_resumen_formato(self, codigo_formato, codigo_norm, debito, credito):
         codigo_parametro = self._mapear_codigos_parametro(codigo_formato, codigo_norm)
         mascara = codigo_parametro.ne('')
+        nit = self._serie_nit_limpio()
+        tercero = self._serie_texto(self.columnas['tercero'])
 
         if codigo_formato == '1001':
-            return mascara, codigo_parametro
+            return self._mascara_formato_1001(codigo_parametro, debito), codigo_parametro
 
         if codigo_formato == '1007':
             parametros_1007 = MAPEO_CUENTAS_FORMULARIO.get('1007', {}).get('parametros', {})
             naturaleza = codigo_parametro.map(
                 lambda codigo: parametros_1007.get(codigo, {}).get('naturaleza', '')
             )
-            return mascara & naturaleza.ne('NO'), codigo_parametro
+            valor_relevante = self._valor_relevante_formato(codigo_formato, codigo_parametro, debito, credito)
+            return (
+                mascara
+                & naturaleza.ne('NO')
+                & self._mascara_con_tercero_para_valores(nit, tercero, valor_relevante)
+            ), codigo_parametro
 
-        mascara = mascara & self._mascara_nit_valido()
+        valor_relevante = self._valor_relevante_formato(codigo_formato, codigo_parametro, debito, credito)
+        mascara = mascara & self._mascara_con_tercero_para_valores(nit, tercero, valor_relevante)
 
         if codigo_formato in {'1008', '1009'}:
             mascara = mascara & ((debito != 0) | (credito != 0))
@@ -519,9 +626,17 @@ class DataProcessor:
             '1001',
             df_1001['codigo_normalizado']
         )
-        df_1001 = df_1001[df_1001['codigo_parametro'].ne('')].copy()
+        df_1001 = df_1001[
+            self._mascara_formato_1001(
+                df_1001['codigo_parametro'],
+                df_1001['debito'],
+                df_1001['nit'],
+                df_1001['tercero']
+            )
+        ].copy()
         if df_1001.empty:
             return pd.DataFrame(columns=self.COLUMNAS_FORMATO_1001)
+        self._enriquecer_ubicacion_contacto(df_1001)
 
         df_1001['Concepto'] = df_1001['codigo_parametro'].map(
             lambda codigo: mapa_1001[codigo]['concepto']
@@ -555,10 +670,11 @@ class DataProcessor:
         ]
         df_1001 = pd.concat([df_1001, nombres], axis=1)
 
-        df_1001['Dirección'] = ''
-        df_1001['Código dpto.'] = ''
-        df_1001['Código mcp'] = ''
-        df_1001['País de residencia o domicilio'] = ''
+        df_1001['Dirección'] = df_1001['direccion'].fillna('')
+        df_1001['Código dpto.'] = df_1001['dpto'].fillna('')
+        df_1001['Código mcp'] = df_1001['municipio'].fillna('')
+        df_1001['País de residencia o domicilio'] = df_1001['pais'].fillna('')
+
         df_1001['Pago o abono en cuenta deducible'] = df_1001['debito']
         df_1001['Pago o abono en cuenta no deducible'] = 0.0
         df_1001['Iva mayor valor del costo o gasto deducible'] = 0.0
@@ -591,8 +707,15 @@ class DataProcessor:
         df_1005['codigo_parametro'] = df_1005['codigo_normalizado'].map(
             lambda codigo: obtener_codigo_parametro_formulario('1005', codigo)
         )
+        valor_relevante = self._valor_relevante_formato(
+            '1005',
+            df_1005['codigo_parametro'],
+            df_1005['debito'],
+            df_1005['credito']
+        )
         df_1005 = df_1005[
-            df_1005['codigo_parametro'].ne('') & df_1005['nit'].ne('')
+            df_1005['codigo_parametro'].ne('')
+            & self._mascara_con_tercero_para_valores(df_1005['nit'], df_1005['tercero'], valor_relevante)
         ].copy()
         if df_1005.empty:
             return pd.DataFrame(columns=self.COLUMNAS_FORMATO_1005)
@@ -652,8 +775,15 @@ class DataProcessor:
         df_1006['codigo_parametro'] = df_1006['codigo_normalizado'].map(
             lambda codigo: obtener_codigo_parametro_formulario('1006', codigo)
         )
+        valor_relevante = self._valor_relevante_formato(
+            '1006',
+            df_1006['codigo_parametro'],
+            df_1006['debito'],
+            df_1006['credito']
+        )
         df_1006 = df_1006[
-            df_1006['codigo_parametro'].ne('') & df_1006['nit'].ne('')
+            df_1006['codigo_parametro'].ne('')
+            & self._mascara_con_tercero_para_valores(df_1006['nit'], df_1006['tercero'], valor_relevante)
         ].copy()
         if df_1006.empty:
             return pd.DataFrame(columns=self.COLUMNAS_FORMATO_1006)
@@ -723,8 +853,16 @@ class DataProcessor:
         df_1007['codigo_parametro'] = df_1007['codigo_normalizado'].map(
             lambda codigo: obtener_codigo_parametro_formulario('1007', codigo)
         )
-        # Para 1007, no filtrar por NIT - permite procesar cuentas sin tercero especifico
-        df_1007 = df_1007[df_1007['codigo_parametro'].ne('')].copy()
+        valor_relevante = self._valor_relevante_formato(
+            '1007',
+            df_1007['codigo_parametro'],
+            df_1007['debito'],
+            df_1007['credito']
+        )
+        df_1007 = df_1007[
+            df_1007['codigo_parametro'].ne('')
+            & self._mascara_con_tercero_para_valores(df_1007['nit'], df_1007['tercero'], valor_relevante)
+        ].copy()
         if df_1007.empty:
             return pd.DataFrame(columns=self.COLUMNAS_FORMATO_1007)
 
@@ -804,13 +942,20 @@ class DataProcessor:
         df_1008['codigo_parametro'] = df_1008['codigo_normalizado'].map(
             lambda codigo: obtener_codigo_parametro_formulario('1008', codigo)
         )
+        valor_relevante = self._valor_relevante_formato(
+            '1008',
+            df_1008['codigo_parametro'],
+            df_1008['debito'],
+            df_1008['credito']
+        )
         df_1008 = df_1008[
             df_1008['codigo_parametro'].ne('')
-            & df_1008['nit'].ne('')
+            & self._mascara_con_tercero_para_valores(df_1008['nit'], df_1008['tercero'], valor_relevante)
             & ((df_1008['debito'] != 0) | (df_1008['credito'] != 0))
         ].copy()
         if df_1008.empty:
             return pd.DataFrame(columns=self.COLUMNAS_FORMATO_1008)
+        self._enriquecer_ubicacion_contacto(df_1008)
 
         df_1008['Concepto'] = df_1008['codigo_parametro'].map(
             lambda codigo: parametros_1008[codigo]['concepto']
@@ -873,13 +1018,20 @@ class DataProcessor:
         df_1009['codigo_parametro'] = df_1009['codigo_normalizado'].map(
             lambda codigo: obtener_codigo_parametro_formulario('1009', codigo)
         )
+        valor_relevante = self._valor_relevante_formato(
+            '1009',
+            df_1009['codigo_parametro'],
+            df_1009['debito'],
+            df_1009['credito']
+        )
         df_1009 = df_1009[
             df_1009['codigo_parametro'].ne('')
-            & df_1009['nit'].ne('')
+            & self._mascara_con_tercero_para_valores(df_1009['nit'], df_1009['tercero'], valor_relevante)
             & ((df_1009['debito'] != 0) | (df_1009['credito'] != 0))
         ].copy()
         if df_1009.empty:
             return pd.DataFrame(columns=self.COLUMNAS_FORMATO_1009)
+        self._enriquecer_ubicacion_contacto(df_1009)
 
         df_1009['Concepto'] = df_1009['codigo_parametro'].map(
             lambda codigo: parametros_1009[codigo]['concepto']
@@ -949,13 +1101,20 @@ class DataProcessor:
         df_2276['codigo_parametro'] = df_2276['codigo_normalizado'].map(
             lambda codigo: obtener_codigo_parametro_formulario('2276', codigo)
         )
+        valor_relevante = self._valor_relevante_formato(
+            '2276',
+            df_2276['codigo_parametro'],
+            df_2276['debito'],
+            df_2276['credito']
+        )
         df_2276 = df_2276[
             df_2276['codigo_parametro'].ne('')
-            & df_2276['nit'].ne('')
+            & self._mascara_con_tercero_para_valores(df_2276['nit'], df_2276['tercero'], valor_relevante)
             & ((df_2276['debito'] != 0) | (df_2276['credito'] != 0))
         ].copy()
         if df_2276.empty:
             return pd.DataFrame(columns=self.COLUMNAS_FORMATO_2276)
+        self._enriquecer_ubicacion_contacto(df_2276)
 
         df_2276['columna_valor'] = df_2276['codigo_parametro'].map(
             lambda codigo: self.UBICACION_COLUMNAS_2276.get(
@@ -1170,16 +1329,18 @@ class DataProcessor:
         if tipo_doc == '31':
             return ['', '', '', '', razon_social]
 
+        # En el balance los nombres de personas naturales deben venir en orden DIAN:
+        # primer apellido, segundo apellido, primer nombre y otros nombres.
         partes = razon_social.split()
         if len(partes) == 1:
-            return ['', '', partes[0], '', '']
+            return [partes[0], '', '', '', '']
         if len(partes) == 2:
-            return [partes[1], '', partes[0], '', '']
+            return [partes[0], '', partes[1], '', '']
         if len(partes) == 3:
-            return [partes[1], partes[2], partes[0], '', '']
+            return [partes[0], partes[1], partes[2], '', '']
 
-        primer_nombre = partes[0]
-        otros_nombres = ' '.join(partes[1:-2])
-        primer_apellido = partes[-2]
-        segundo_apellido = partes[-1]
+        primer_apellido = partes[0]
+        segundo_apellido = partes[1]
+        primer_nombre = partes[2]
+        otros_nombres = ' '.join(partes[3:])
         return [primer_apellido, segundo_apellido, primer_nombre, otros_nombres, '']

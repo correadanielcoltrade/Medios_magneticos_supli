@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from modules.data_processor import DataProcessor
+from modules.odoo_client import OdooContactProvider
 from modules.excel_generator import ExcelGenerator
 
 app = Flask(__name__)
@@ -100,14 +101,26 @@ def process_report_job(job_id, codigo_formato, dataframe_path):
         with open(dataframe_path, 'rb') as f:
             df = pickle.load(f)
 
+        set_report_job(job_id, message='Inicializando conexion a Odoo...')
+        contact_provider = OdooContactProvider.from_environment()
+        if contact_provider:
+            try:
+                contact_provider._conectar()
+                logger.info(f"[ODOO] Conectado exitosamente (UID: {contact_provider.uid})")
+            except Exception as e:
+                logger.warning(f"[ODOO] No se pudo conectar a Odoo: {e}. Los campos de ubicacion no se llenaran.")
+                contact_provider = None
+        else:
+            logger.warning("[ODOO] Credenciales de Odoo no configuradas. Los campos de ubicacion no se llenaran.")
+
         set_report_job(job_id, message='Procesando formato...')
-        processor = DataProcessor(df)
+        processor = DataProcessor(df, contact_provider=contact_provider)
         valido, errores = processor.validar_estructura()
         if not valido:
             set_report_job(
                 job_id,
                 status='error',
-                message=f'Estructura invÃ¡lida: {"; ".join(errores)}'
+                message=f'Estructura invalida: {"; ".join(errores)}'
             )
             return
 

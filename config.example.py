@@ -21,6 +21,14 @@ MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 # Secret key para sesiones (cambiar en producción)
 SECRET_KEY = 'coltrade_medios_magneticos_2025'
 
+# ==================== INTEGRACIÓN ODOO ====================
+
+# Configurar estos valores como variables de entorno o en un archivo local .env.
+# ODOO_URL = 'https://tuempresa.odoo.com'
+# ODOO_DB = 'tu_base_odoo'
+# ODOO_USER = 'usuario@empresa.com'
+# ODOO_API_KEY = 'api_key_generada_en_odoo'
+
 # ==================== CONFIGURACIÓN DE FORMATOS ====================
 
 FORMATOS = {
