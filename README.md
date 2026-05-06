@@ -99,16 +99,37 @@ generador-medios-magneticos/
 
 ### Integración con Odoo
 
-Los formatos `1001`, `1008`, `1009` y `2276` pueden completar dirección, departamento, municipio y país desde el contacto de Odoo usando el NIT del tercero. Configura estas variables de entorno antes de generar reportes:
+Los formatos `1001`, `1008`, `1009` y `2276` pueden completar dirección, departamento, municipio y país desde el contacto de Odoo usando el NIT del tercero. 
+
+#### Configuración Local (.env)
+
+Para desarrollo local, crea un archivo `.env` en la raíz del proyecto:
 
 ```bash
 ODOO_URL=https://tuempresa.odoo.com
 ODOO_DB=tu_base_odoo
 ODOO_USER=usuario@empresa.com
-ODOO_API_KEY=api_key_generada_en_odoo
+ODOO_PASSWORD=tu_contraseña_real
 ```
 
-También puedes guardarlas en un archivo local `.env` en la raíz del proyecto. Ese archivo está excluido de Git.
+**Nota**: Usa la contraseña real de Odoo, NO la API Key (XML-RPC requiere la contraseña).
+
+#### Configuración en Producción (Render)
+
+En Render, configura las variables de entorno en el dashboard:
+
+1. Ve a tu aplicación en Render
+2. Selecciona **Environment** en el menú lateral
+3. Añade estas variables:
+   - `ODOO_URL`: Tu URL de Odoo (ej: https://tuempresa.odoo.com)
+   - `ODOO_DB`: Tu base de datos en Odoo
+   - `ODOO_USER`: Tu usuario de Odoo
+   - `ODOO_PASSWORD`: Tu contraseña de Odoo
+   - `FLASK_ENV=production` (recomendado)
+
+4. Redeploy la aplicación
+
+**Importante**: NO comitas el archivo `.env` a Git. Asegúrate que está en `.gitignore`.
 
 ## 📊 Estructura del Archivo de Balance
 
@@ -229,6 +250,37 @@ lsof -ti:5000 | xargs kill -9
 1. Verifica que el archivo está en formato `.xlsx` (no `.xls`)
 2. Verifica que el nombre contiene "balance"
 3. Verifica la estructura (7 columnas, datos numéricos)
+
+### Los campos de Odoo no se rellenan en Excel (Render Production)
+
+**Causa**: Las variables de entorno de Odoo no están configuradas en Render.
+
+**Solución**:
+
+1. **Verificar variables en Render**:
+   - Ve a tu aplicación → **Environment**
+   - Confirma que existen: `ODOO_URL`, `ODOO_DB`, `ODOO_USER`, `ODOO_PASSWORD`
+   - Si faltan, agrégalas y haz Redeploy
+
+2. **Verificar logs de Render**:
+   - Ve a **Logs** en Render
+   - Busca mensajes `[ODOO]` para ver qué variables faltan
+   - Si ves "Credenciales faltantes: ODOO_PASSWORD", la variable no está configurada
+
+3. **Probar localmente con `.env`**:
+   - Crea `.env` local con las credenciales correctas
+   - Ejecuta `python app.py` y genera un reporte
+   - Si funciona local, es un problema de configuración en Render
+
+4. **Verificar conectividad de red**:
+   - Asegúrate que Render puede alcanzar tu servidor Odoo
+   - Si Odoo está en red privada, puede que necesites whitelist de IPs de Render
+
+### Error: "No fue posible autenticarse en Odoo"
+
+- Verifica que `ODOO_PASSWORD` es tu contraseña real, NO la API Key
+- Confirma que usuario y contraseña son correctos en el dashboard de Odoo
+- Verifica que el usuario tiene permisos para acceder a `res.partner`
 
 ## 📞 Soporte
 

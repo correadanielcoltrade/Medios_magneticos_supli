@@ -108,10 +108,14 @@ def process_report_job(job_id, codigo_formato, dataframe_path):
                 contact_provider._conectar()
                 logger.info(f"[ODOO] Conectado exitosamente (UID: {contact_provider.uid})")
             except Exception as e:
-                logger.warning(f"[ODOO] No se pudo conectar a Odoo: {e}. Los campos de ubicacion no se llenaran.")
+                logger.error(f"[ODOO] No se pudo conectar a Odoo: {e}")
+                logger.error(f"[ODOO] Rastreo completo: {traceback.format_exc()}")
+                logger.warning(f"[ODOO] Los campos de ubicacion no se llenaran.")
                 contact_provider = None
         else:
-            logger.warning("[ODOO] Credenciales de Odoo no configuradas. Los campos de ubicacion no se llenaran.")
+            logger.error("[ODOO] Credenciales de Odoo no configuradas en el ambiente.")
+            logger.error("[ODOO] Variables requeridas: ODOO_URL, ODOO_USER, ODOO_PASSWORD, ODOO_DB")
+            logger.warning("[ODOO] Los campos de ubicacion no se llenaran.")
 
         set_report_job(job_id, message='Procesando formato...')
         processor = DataProcessor(df, contact_provider=contact_provider)

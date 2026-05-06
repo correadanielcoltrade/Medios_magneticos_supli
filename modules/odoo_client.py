@@ -46,6 +46,17 @@ class OdooContactProvider:
         db = os.environ.get('ODOO_DB', '').strip() or cls._inferir_db(url)
 
         if not all([url, db, user, password]):
+            missing = []
+            if not url:
+                missing.append('ODOO_URL')
+            if not user:
+                missing.append('ODOO_USER')
+            if not password:
+                missing.append('ODOO_PASSWORD')
+            if not db:
+                missing.append('ODOO_DB (o inferir desde ODOO_URL)')
+            import sys
+            print(f"[ODOO] Credenciales faltantes: {', '.join(missing)}", file=sys.stderr)
             return None
         return cls(url, db, user, password)
 
