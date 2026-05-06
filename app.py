@@ -574,10 +574,25 @@ def download(codigo_formato):
                 'message': f'Error al cargar datos: {str(e)}'
             }), 400
 
+        # Inicializar conexion a Odoo
+        logger.info(f"[3.5/5] Initializing Odoo connection...")
+        contact_provider = OdooContactProvider.from_environment()
+        if contact_provider:
+            try:
+                contact_provider._conectar()
+                logger.info(f"[ODOO] Conectado exitosamente (UID: {contact_provider.uid})")
+            except Exception as e:
+                logger.error(f"[ODOO] No se pudo conectar a Odoo: {e}")
+                logger.error(f"[ODOO] Rastreo completo: {traceback.format_exc()}")
+                logger.warning(f"[ODOO] Los campos de ubicacion no se llenaran.")
+                contact_provider = None
+        else:
+            logger.warning("[ODOO] Credenciales de Odoo no configuradas.")
+
         # Procesar datos según formato
         logger.info(f"[4/5] Processing {codigo_formato}...")
         try:
-            processor = DataProcessor(df)
+            processor = DataProcessor(df, contact_provider=contact_provider)
 
             # Validar estructura
             valido, errores = processor.validar_estructura()
