@@ -41,10 +41,8 @@ class OdooContactProvider:
         load_env_file()
         url = os.environ.get('ODOO_URL', '').strip()
         user = os.environ.get('ODOO_USER', '').strip()
-        password = (
-            os.environ.get('ODOO_API_KEY', '').strip()
-            or os.environ.get('ODOO_PASSWORD', '').strip()
-        )
+        # Para xmlrpc, SIEMPRE usar la contraseña real, nunca la API Key
+        password = os.environ.get('ODOO_PASSWORD', '').strip()
         db = os.environ.get('ODOO_DB', '').strip() or cls._inferir_db(url)
 
         if not all([url, db, user, password]):
