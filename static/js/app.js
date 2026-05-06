@@ -427,7 +427,7 @@ class ReportApp {
     }
 
     waitForDownloadJob(codigo, jobId, startTime) {
-        const maxAttempts = 120;
+        const maxAttempts = 300;  // 300 attempts * 2 segundos = 600 segundos = 10 minutos
         let attempts = 0;
 
         return new Promise((resolve, reject) => {
@@ -450,11 +450,11 @@ class ReportApp {
                             return;
                         }
 
-                        const progress = Math.min(80, 10 + attempts);
+                        const progress = Math.min(80, 10 + (attempts / 3));
                         this.showDownloadProgress(codigo, progress);
 
                         if (attempts >= maxAttempts) {
-                            reject(new Error('La generacion del reporte esta tardando demasiado. Intenta nuevamente.'));
+                            reject(new Error('La generacion del reporte esta tardando demasiado. Por favor, verifica tu conexion a Odoo.'));
                             return;
                         }
 

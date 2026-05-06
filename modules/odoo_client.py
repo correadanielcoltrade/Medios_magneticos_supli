@@ -282,8 +282,9 @@ class OdooContactProvider:
             if 'city_id' in campos_disponibles:
                 campos.append('city_id')
 
-            # Procesar por lotes para evitar dominios demasiado grandes
-            BATCH_SIZE = 100
+            # Procesar por lotes para evitar dominios demasiado grandes y timeouts
+            # Tamaño reducido (50) para mejorar velocidad en producción con latencia de red
+            BATCH_SIZE = 50
             for i in range(0, len(nits_pendientes), BATCH_SIZE):
                 lote = nits_pendientes[i:i + BATCH_SIZE]
                 variantes_lote = []
