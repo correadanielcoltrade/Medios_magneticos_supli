@@ -921,79 +921,85 @@ class DataProcessor:
 
     def _procesar_formato_1008(self):
         """Construye el formato 1008 con saldo CXC calculado como debito menos credito."""
-        parametros_1008 = MAPEO_CUENTAS_FORMULARIO.get('1008', {}).get('parametros', {})
-        codigo_norm = self._serie_codigo_normalizado()
-        nit = self._serie_nit_limpio()
-        tercero = self._serie_texto(self.columnas['tercero'])
-        debito = self._serie_numerica(self.columnas['debito'])
-        credito = self._serie_numerica(self.columnas['credito'])
+        try:
+            parametros_1008 = MAPEO_CUENTAS_FORMULARIO.get('1008', {}).get('parametros', {})
+            codigo_norm = self._serie_codigo_normalizado()
+            nit = self._serie_nit_limpio()
+            tercero = self._serie_texto(self.columnas['tercero'])
+            debito = self._serie_numerica(self.columnas['debito'])
+            credito = self._serie_numerica(self.columnas['credito'])
 
-        df_1008 = pd.DataFrame({
-            'codigo_normalizado': codigo_norm,
-            'nit': nit,
-            'tercero': tercero,
-            'debito': debito,
-            'credito': credito,
-            'direccion': self._serie_columna_opcional('Direccion', 'Dirección'),
-            'dpto': self._serie_columna_opcional('Dpto', 'Departamento', 'Código dpto.', 'Codigo dpto.'),
-            'municipio': self._serie_columna_opcional('Municipio', 'Código mcp', 'Codigo mcp'),
-            'pais': self._serie_columna_opcional('Pais', 'País'),
-        })
-        df_1008['codigo_parametro'] = df_1008['codigo_normalizado'].map(
-            lambda codigo: obtener_codigo_parametro_formulario('1008', codigo)
-        )
-        valor_relevante = self._valor_relevante_formato(
-            '1008',
-            df_1008['codigo_parametro'],
-            df_1008['debito'],
-            df_1008['credito']
-        )
-        df_1008 = df_1008[
-            df_1008['codigo_parametro'].ne('')
-            & self._mascara_con_tercero_para_valores(df_1008['nit'], df_1008['tercero'], valor_relevante)
-            & ((df_1008['debito'] != 0) | (df_1008['credito'] != 0))
-        ].copy()
-        if df_1008.empty:
-            return pd.DataFrame(columns=self.COLUMNAS_FORMATO_1008)
-        self._enriquecer_ubicacion_contacto(df_1008)
+            df_1008 = pd.DataFrame({
+                'codigo_normalizado': codigo_norm,
+                'nit': nit,
+                'tercero': tercero,
+                'debito': debito,
+                'credito': credito,
+                'direccion': self._serie_columna_opcional('Direccion', 'Dirección'),
+                'dpto': self._serie_columna_opcional('Dpto', 'Departamento', 'Código dpto.', 'Codigo dpto.'),
+                'municipio': self._serie_columna_opcional('Municipio', 'Código mcp', 'Codigo mcp'),
+                'pais': self._serie_columna_opcional('Pais', 'País'),
+            })
+            df_1008['codigo_parametro'] = df_1008['codigo_normalizado'].map(
+                lambda codigo: obtener_codigo_parametro_formulario('1008', codigo)
+            )
+            valor_relevante = self._valor_relevante_formato(
+                '1008',
+                df_1008['codigo_parametro'],
+                df_1008['debito'],
+                df_1008['credito']
+            )
+            df_1008 = df_1008[
+                df_1008['codigo_parametro'].ne('')
+                & self._mascara_con_tercero_para_valores(df_1008['nit'], df_1008['tercero'], valor_relevante)
+                & ((df_1008['debito'] != 0) | (df_1008['credito'] != 0))
+            ].copy()
+            if df_1008.empty:
+                return pd.DataFrame(columns=self.COLUMNAS_FORMATO_1008)
+            self._enriquecer_ubicacion_contacto(df_1008)
 
-        df_1008['Concepto'] = df_1008['codigo_parametro'].map(
-            lambda codigo: parametros_1008[codigo]['concepto']
-        )
-        df_1008['Código Cuentas Contables'] = df_1008['codigo_parametro']
-        df_1008['Descripción'] = df_1008['codigo_parametro'].map(
-            lambda codigo: parametros_1008[codigo]['descripcion']
-        )
-        df_1008['Tipo Documento'] = df_1008.apply(
-            lambda row: self._inferir_tipo_documento(row['nit'], row['tercero']),
-            axis=1
-        )
-        df_1008['Numero de identificacion'] = df_1008['nit']
-        df_1008['DV'] = ''
+            df_1008['Concepto'] = df_1008['codigo_parametro'].map(
+                lambda codigo: parametros_1008.get(codigo, {}).get('concepto', '')
+            )
+            df_1008['Código Cuentas Contables'] = df_1008['codigo_parametro']
+            df_1008['Descripción'] = df_1008['codigo_parametro'].map(
+                lambda codigo: parametros_1008.get(codigo, {}).get('descripcion', '')
+            )
+            df_1008['Tipo Documento'] = df_1008.apply(
+                lambda row: self._inferir_tipo_documento(row['nit'], row['tercero']),
+                axis=1
+            )
+            df_1008['Numero de identificacion'] = df_1008['nit']
+            df_1008['DV'] = ''
 
-        nombres = df_1008.apply(
-            lambda row: self._dividir_nombre(row['Tipo Documento'], row['tercero']),
-            axis=1,
-            result_type='expand'
-        )
-        nombres.columns = [
-            'Primer apellido del informado',
-            'Segundo apellido del informado',
-            'Primer nombre del informado',
-            'Otros nombres del informado',
-            'Razón social informado',
-        ]
-        df_1008 = pd.concat([df_1008, nombres], axis=1)
+            nombres = df_1008.apply(
+                lambda row: self._dividir_nombre(row['Tipo Documento'], row['tercero']),
+                axis=1,
+                result_type='expand'
+            )
+            nombres.columns = [
+                'Primer apellido del informado',
+                'Segundo apellido del informado',
+                'Primer nombre del informado',
+                'Otros nombres del informado',
+                'Razón social informado',
+            ]
+            df_1008 = pd.concat([df_1008, nombres], axis=1)
 
-        df_1008['Direccion'] = df_1008['direccion']
-        df_1008['Dpto'] = df_1008['dpto']
-        df_1008['Municipio'] = df_1008['municipio']
-        df_1008['Pais'] = df_1008['pais']
-        df_1008['Saldo CXC a 31 diciembre'] = df_1008['debito'] - df_1008['credito']
+            df_1008['Direccion'] = df_1008['direccion'].fillna('').astype(str)
+            df_1008['Dpto'] = df_1008['dpto'].fillna('').astype(str)
+            df_1008['Municipio'] = df_1008['municipio'].fillna('').astype(str)
+            df_1008['Pais'] = df_1008['pais'].fillna('').astype(str)
+            df_1008['Saldo CXC a 31 diciembre'] = df_1008['debito'] - df_1008['credito']
 
-        resultado = df_1008[self.COLUMNAS_FORMATO_1008].reset_index(drop=True)
-        print(f"[4/5] Datos procesados para 1008: {len(resultado)} filas")
-        return resultado
+            resultado = df_1008[self.COLUMNAS_FORMATO_1008].reset_index(drop=True)
+            print(f"[4/5] Datos procesados para 1008: {len(resultado)} filas")
+            return resultado
+        except Exception as e:
+            import traceback
+            print(f"[ERROR] Error al procesar formato 1008: {str(e)}")
+            traceback.print_exc()
+            raise
 
     def _procesar_formato_1009(self):
         """Construye el formato 1009 con saldo CXP calculado como credito menos debito."""
