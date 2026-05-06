@@ -235,4 +235,72 @@ class OdooContactProvider:
         return datos
 
     def obtener_contactos(self, nits):
-        return {str(nit): self.obtener_contacto(nit) for nit in nits}
+        """Obtiene contactos para múltiples NITs con una sola búsqueda a Odoo."""
+        if not nits:
+            return {}
+
+        # Preparar lista de NITs limpios y variantes
+        nits_a_buscar = []
+        nits_str = []
+        for nit in nits:
+            nit_str = str(nit).strip()
+            clave = self._limpiar_vat(nit_str)
+            if clave:
+                if clave not in self._cache:
+                    nits_a_buscar.append(nit_str)
+                nits_str.append(nit_str)
+
+        resultado = {}
+
+        # Agregar contactos que ya están en cache
+        for nit_str in nits_str:
+            clave = self._limpiar_vat(nit_str)
+            if clave in self._cache:
+                resultado[nit_str] = self._cache[clave]
+
+        # Si no hay NITs nuevos, retornar cache
+        if not nits_a_buscar:
+            return resultado
+
+        # Hacer una SOLA búsqueda en Odoo para todos los NITs
+        campos_disponibles = self._partner_campos()
+        campos = ['vat', 'street', 'street2', 'city', 'state_id', 'country_id']
+        if 'city_id' in campos_disponibles:
+            campos.append('city_id')
+
+        try:
+            # Búsqueda por VAT exacto (más eficiente)
+            variantes_todas = []
+            for nit in nits_a_buscar:
+                variantes_todas.extend(self._variantes_vat(nit))
+
+            contactos = self._execute_kw(
+                'res.partner',
+                'search_read',
+                [self._dominio_or('vat', '=', variantes_todas)],
+                {'fields': campos, 'limit': 1000},
+            )
+        except Exception:
+            # Si falla, retornar vacío
+            contactos = []
+
+        # Mapear resultados
+        for contacto_odoo in contactos:
+            vat_odoo = self._limpiar_vat(contacto_odoo.get('vat', ''))
+            datos = self._mapear_contacto(contacto_odoo)
+
+            # Cachear por NIT limpio
+            self._cache[vat_odoo] = datos
+
+            # Asignar a todos los NITs que coincidan
+            for nit_str in nits_a_buscar:
+                if self._limpiar_vat(nit_str) == vat_odoo:
+                    resultado[nit_str] = datos
+
+        # Asegurar que todos los NITs tengan una entrada (vacía si no se encontró)
+        for nit_str in nits_str:
+            if nit_str not in resultado:
+                clave = self._limpiar_vat(nit_str)
+                resultado[nit_str] = self._cache.get(clave, {})
+
+        return resultado
