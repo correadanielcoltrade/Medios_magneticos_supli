@@ -658,7 +658,7 @@ def start_download_job(codigo_formato):
     """Inicia generacion asincrona para reportes pesados."""
     try:
         # Formatos pesados que requieren procesamiento asíncrono (Odoo + muchos registros)
-        FORMATOS_ASINCRONICOS = {'1001', '1008', '1009', '2276'}
+        FORMATOS_ASINCRONICOS = {'1001', '1008'}
         if codigo_formato not in FORMATOS_ASINCRONICOS:
             return jsonify({
                 'success': False,

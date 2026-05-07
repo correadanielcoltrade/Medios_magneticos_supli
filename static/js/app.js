@@ -310,7 +310,7 @@ class ReportApp {
         const dataframe_id = localStorage.getItem('dataframe_id') || '';
 
         // Formatos pesados que requieren procesamiento asíncrono (Odoo + muchos registros)
-        const formatosAsincronicos = ['1001', '1008', '1009', '2276'];
+        const formatosAsincronicos = ['1001', '1008'];
         if (formatosAsincronicos.includes(codigo)) {
             this.handleAsyncDownload(codigo, dataframe_id, card, btn, loading, startTime);
             return;
