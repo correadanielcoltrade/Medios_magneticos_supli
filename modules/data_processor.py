@@ -965,17 +965,20 @@ class DataProcessor:
             df_1008['Descripción'] = df_1008['codigo_parametro'].map(
                 lambda codigo: parametros_1008.get(codigo, {}).get('descripcion', '')
             )
-            df_1008['Tipo Documento'] = df_1008.apply(
-                lambda row: self._inferir_tipo_documento(row['nit'], row['tercero']),
-                axis=1
-            )
+            tipos_documento = [
+                self._inferir_tipo_documento(nit_valor, tercero_valor)
+                for nit_valor, tercero_valor in zip(df_1008['nit'].tolist(), df_1008['tercero'].tolist())
+            ]
+            df_1008['Tipo Documento'] = tipos_documento
             df_1008['Numero de identificacion'] = df_1008['nit']
             df_1008['DV'] = ''
 
-            nombres = df_1008.apply(
-                lambda row: self._dividir_nombre(row['Tipo Documento'], row['tercero']),
-                axis=1,
-                result_type='expand'
+            nombres = pd.DataFrame(
+                [
+                    self._dividir_nombre(tipo_doc, tercero_valor)
+                    for tipo_doc, tercero_valor in zip(tipos_documento, df_1008['tercero'].tolist())
+                ],
+                index=df_1008.index
             )
             nombres.columns = [
                 'Primer apellido del informado',
@@ -986,10 +989,10 @@ class DataProcessor:
             ]
             df_1008 = pd.concat([df_1008, nombres], axis=1)
 
-            df_1008['Direccion'] = df_1008['direccion'].fillna('').astype(str)
-            df_1008['Dpto'] = df_1008['dpto'].fillna('').astype(str)
-            df_1008['Municipio'] = df_1008['municipio'].fillna('').astype(str)
-            df_1008['Pais'] = df_1008['pais'].fillna('').astype(str)
+            df_1008['Direccion'] = df_1008['direccion'].fillna('')
+            df_1008['Dpto'] = df_1008['dpto'].fillna('')
+            df_1008['Municipio'] = df_1008['municipio'].fillna('')
+            df_1008['Pais'] = df_1008['pais'].fillna('')
             df_1008['Saldo CXC a 31 diciembre'] = df_1008['debito'] - df_1008['credito']
 
             resultado = df_1008[self.COLUMNAS_FORMATO_1008].reset_index(drop=True)
@@ -1046,17 +1049,20 @@ class DataProcessor:
         df_1009['Descripción'] = df_1009['codigo_parametro'].map(
             lambda codigo: parametros_1009[codigo]['descripcion']
         )
-        df_1009['Tipo Documento'] = df_1009.apply(
-            lambda row: self._inferir_tipo_documento(row['nit'], row['tercero']),
-            axis=1
-        )
+        tipos_documento_1009 = [
+            self._inferir_tipo_documento(nit_valor, tercero_valor)
+            for nit_valor, tercero_valor in zip(df_1009['nit'].tolist(), df_1009['tercero'].tolist())
+        ]
+        df_1009['Tipo Documento'] = tipos_documento_1009
         df_1009['Número identificación del informado'] = df_1009['nit']
         df_1009['DV'] = ''
 
-        nombres = df_1009.apply(
-            lambda row: self._dividir_nombre(row['Tipo Documento'], row['tercero']),
-            axis=1,
-            result_type='expand'
+        nombres = pd.DataFrame(
+            [
+                self._dividir_nombre(tipo_doc, tercero_valor)
+                for tipo_doc, tercero_valor in zip(tipos_documento_1009, df_1009['tercero'].tolist())
+            ],
+            index=df_1009.index
         )
         nombres.columns = [
             'Primer apellido del informado',
@@ -1067,10 +1073,10 @@ class DataProcessor:
         ]
         df_1009 = pd.concat([df_1009, nombres], axis=1)
 
-        df_1009['Direccion'] = df_1009['direccion']
-        df_1009['Dpto'] = df_1009['dpto']
-        df_1009['Municipio'] = df_1009['municipio']
-        df_1009['Pais'] = df_1009['pais']
+        df_1009['Direccion'] = df_1009['direccion'].fillna('')
+        df_1009['Dpto'] = df_1009['dpto'].fillna('')
+        df_1009['Municipio'] = df_1009['municipio'].fillna('')
+        df_1009['Pais'] = df_1009['pais'].fillna('')
         df_1009['Saldo CXP a 31 diciembre'] = df_1009['credito'] - df_1009['debito']
 
         resultado = df_1009[self.COLUMNAS_FORMATO_1009].reset_index(drop=True)
@@ -1136,19 +1142,21 @@ class DataProcessor:
         df_2276['valor'] = df_2276['debito'].where(~usa_credito, df_2276['credito'])
 
         resultado = pd.DataFrame(0.0, index=df_2276.index, columns=self.COLUMNAS_VALOR_2276)
-        resultado.insert(0, 'País', df_2276['pais'])
-        resultado.insert(0, 'Municipio', df_2276['municipio'])
-        resultado.insert(0, 'Dpto', df_2276['dpto'])
-        resultado.insert(0, 'Direccion', df_2276['direccion'])
+        resultado.insert(0, 'País', df_2276['pais'].fillna(''))
+        resultado.insert(0, 'Municipio', df_2276['municipio'].fillna(''))
+        resultado.insert(0, 'Dpto', df_2276['dpto'].fillna(''))
+        resultado.insert(0, 'Direccion', df_2276['direccion'].fillna(''))
 
-        tipo_doc = df_2276.apply(
-            lambda row: self._inferir_tipo_documento(row['nit'], row['tercero']),
-            axis=1
-        )
-        nombres = df_2276.assign(tipo_doc=tipo_doc).apply(
-            lambda row: self._dividir_nombre(row['tipo_doc'], row['tercero']),
-            axis=1,
-            result_type='expand'
+        tipo_doc = [
+            self._inferir_tipo_documento(nit_valor, tercero_valor)
+            for nit_valor, tercero_valor in zip(df_2276['nit'].tolist(), df_2276['tercero'].tolist())
+        ]
+        nombres = pd.DataFrame(
+            [
+                self._dividir_nombre(tipo_doc_val, tercero_valor)
+                for tipo_doc_val, tercero_valor in zip(tipo_doc, df_2276['tercero'].tolist())
+            ],
+            index=df_2276.index
         )
         nombres.columns = [
             'Primer apellido empleado',
@@ -1164,7 +1172,7 @@ class DataProcessor:
         resultado.insert(0, 'Segundo apellido empleado', nombres['Segundo apellido empleado'])
         resultado.insert(0, 'Primer apellido empleado', nombres['Primer apellido empleado'])
         resultado.insert(0, 'Número identificación', df_2276['nit'])
-        resultado.insert(0, 'Tipo documento beneficiario', tipo_doc)
+        resultado.insert(0, 'Tipo documento beneficiario', pd.Series(tipo_doc, index=df_2276.index))
         resultado.insert(0, 'Entidad informante', '')
 
         for columna in self.COLUMNAS_FORMATO_2276[41:]:
