@@ -657,10 +657,12 @@ def download(codigo_formato):
 def start_download_job(codigo_formato):
     """Inicia generacion asincrona para reportes pesados."""
     try:
-        if codigo_formato != '1001':
+        # Formatos pesados que requieren procesamiento asíncrono (Odoo + muchos registros)
+        FORMATOS_ASINCRONICOS = {'1001', '1008', '1009', '2276'}
+        if codigo_formato not in FORMATOS_ASINCRONICOS:
             return jsonify({
                 'success': False,
-                'message': 'La generacion asincrona solo esta habilitada para el formato 1001.'
+                'message': f'La generacion asincrona solo esta habilitada para los formatos: {", ".join(sorted(FORMATOS_ASINCRONICOS))}.'
             }), 400
 
         dataframe_id = request.args.get('dataframe_id', '') or session.get('dataframe_id', '')
