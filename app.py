@@ -302,6 +302,11 @@ FORMATOS_DISPONIBLES = {
         'nombre': 'Formato 2276',
         'descripcion': 'Rentas de trabajo (empleados)',
         'icono': '👥'
+    },
+    '1012': {
+        'nombre': 'Formato 1012',
+        'descripcion': 'Saldos de cuentas al 31 de diciembre',
+        'icono': '🏦'
     }
 }
 

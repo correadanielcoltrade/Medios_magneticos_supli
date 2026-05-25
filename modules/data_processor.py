@@ -46,6 +46,11 @@ class DataProcessor:
             'nombre': 'Información de rentas de trabajo (empleados)',
             'descripcion': 'Gastos de nómina',
             'tipo': 'nomina'
+        },
+        '1012': {
+            'nombre': 'Información de saldos de cuentas al 31 de diciembre',
+            'descripcion': 'Saldos en cuentas bancarias y similares',
+            'tipo': 'saldos'
         }
     }
 
@@ -159,6 +164,22 @@ class DataProcessor:
         'Municipio',
         'Pais',
         'Saldo CXP a 31 diciembre',
+    ]
+
+    COLUMNAS_FORMATO_1012 = [
+        'Concepto',
+        'Código Cuentas Contables',
+        'Descripción',
+        'Tipo de documento',
+        'Número de Identificación',
+        'DV',
+        'Primer apellido del informado',
+        'Segundo apellido del informado',
+        'Primer nombre del informado',
+        'Otros nombres del informado',
+        'Razón social informado',
+        'Pais de residencia o domicilio',
+        'Valor al 31-12',
     ]
 
     COLUMNAS_FORMATO_2276 = [
@@ -424,6 +445,8 @@ class DataProcessor:
             return debito.where(~usa_credito, credito)
         if codigo_formato in {'1008', '1009'}:
             return debito.abs() + credito.abs()
+        if codigo_formato == '1012':
+            return debito - credito
         return debito
 
     @staticmethod
@@ -519,6 +542,9 @@ class DataProcessor:
         if codigo_formato in {'1008', '1009'}:
             mascara = mascara & ((debito != 0) | (credito != 0))
 
+        if codigo_formato == '1012':
+            mascara = mascara & ((debito != 0) | (credito != 0))
+
         if codigo_formato == '2276':
             parametros_2276 = MAPEO_CUENTAS_FORMULARIO.get('2276', {}).get('parametros', {})
             columna_valor = codigo_parametro.map(
@@ -536,6 +562,8 @@ class DataProcessor:
             return float((debito[mascara] - credito[mascara]).sum())
         if codigo_formato == '1009':
             return float((credito[mascara] - debito[mascara]).sum())
+        if codigo_formato == '1012':
+            return float((debito[mascara] - credito[mascara]).sum())
         if codigo_formato == '2276':
             usa_credito = codigo_parametro.isin(self.CUENTAS_2276_VALOR_CREDITO)
             valores = debito.where(~usa_credito, credito)
@@ -591,6 +619,8 @@ class DataProcessor:
             return self._procesar_formato_1009()
         if codigo_formato == '2276':
             return self._procesar_formato_2276()
+        if codigo_formato == '1012':
+            return self._procesar_formato_1012()
 
         cuentas_validas = self._obtener_cuentas_formulario(codigo_formato)
         print(f"[DEBUG] Formato {codigo_formato}: {len(cuentas_validas)} cuentas válidas")
@@ -1081,6 +1111,79 @@ class DataProcessor:
 
         resultado = df_1009[self.COLUMNAS_FORMATO_1009].reset_index(drop=True)
         print(f"[4/5] Datos procesados para 1009: {len(resultado)} filas")
+        return resultado
+
+    def _procesar_formato_1012(self):
+        """Construye el formato 1012 (saldos de cuentas) con valor = debito - credito."""
+        parametros_1012 = MAPEO_CUENTAS_FORMULARIO.get('1012', {}).get('parametros', {})
+        codigo_norm = self._serie_codigo_normalizado()
+        nit = self._serie_nit_limpio()
+        tercero = self._serie_texto(self.columnas['tercero'])
+        debito = self._serie_numerica(self.columnas['debito'])
+        credito = self._serie_numerica(self.columnas['credito'])
+
+        df_1012 = pd.DataFrame({
+            'codigo_normalizado': codigo_norm,
+            'nit': nit,
+            'tercero': tercero,
+            'debito': debito,
+            'credito': credito,
+            'pais': self._serie_columna_opcional('Pais', 'País'),
+        })
+        df_1012['codigo_parametro'] = df_1012['codigo_normalizado'].map(
+            lambda codigo: obtener_codigo_parametro_formulario('1012', codigo)
+        )
+        valor_relevante = self._valor_relevante_formato(
+            '1012',
+            df_1012['codigo_parametro'],
+            df_1012['debito'],
+            df_1012['credito']
+        )
+        df_1012 = df_1012[
+            df_1012['codigo_parametro'].ne('')
+            & self._mascara_con_tercero_para_valores(df_1012['nit'], df_1012['tercero'], valor_relevante)
+            & ((df_1012['debito'] != 0) | (df_1012['credito'] != 0))
+        ].copy()
+        if df_1012.empty:
+            return pd.DataFrame(columns=self.COLUMNAS_FORMATO_1012)
+        self._enriquecer_ubicacion_contacto(df_1012)
+
+        df_1012['Concepto'] = df_1012['codigo_parametro'].map(
+            lambda codigo: parametros_1012.get(codigo, {}).get('concepto', '')
+        )
+        df_1012['Código Cuentas Contables'] = df_1012['codigo_parametro']
+        df_1012['Descripción'] = df_1012['codigo_parametro'].map(
+            lambda codigo: parametros_1012.get(codigo, {}).get('descripcion', '')
+        )
+        tipos_documento = [
+            self._inferir_tipo_documento(nit_valor, tercero_valor)
+            for nit_valor, tercero_valor in zip(df_1012['nit'].tolist(), df_1012['tercero'].tolist())
+        ]
+        df_1012['Tipo de documento'] = tipos_documento
+        df_1012['Número de Identificación'] = df_1012['nit']
+        df_1012['DV'] = ''
+
+        nombres = pd.DataFrame(
+            [
+                self._dividir_nombre(tipo_doc, tercero_valor)
+                for tipo_doc, tercero_valor in zip(tipos_documento, df_1012['tercero'].tolist())
+            ],
+            index=df_1012.index
+        )
+        nombres.columns = [
+            'Primer apellido del informado',
+            'Segundo apellido del informado',
+            'Primer nombre del informado',
+            'Otros nombres del informado',
+            'Razón social informado',
+        ]
+        df_1012 = pd.concat([df_1012, nombres], axis=1)
+
+        df_1012['Pais de residencia o domicilio'] = df_1012['pais'].fillna('')
+        df_1012['Valor al 31-12'] = df_1012['debito'] - df_1012['credito']
+
+        resultado = df_1012[self.COLUMNAS_FORMATO_1012].reset_index(drop=True)
+        print(f"[4/5] Datos procesados para 1012: {len(resultado)} filas")
         return resultado
 
     @staticmethod
