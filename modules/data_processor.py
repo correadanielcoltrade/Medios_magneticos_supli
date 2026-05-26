@@ -237,6 +237,11 @@ class DataProcessor:
         '23803003', '23803004', '23803005',
     }
     CUENTAS_1001_EXCLUIR_SIN_DOCUMENTO = {'14350101', '14350102'}
+    CUENTAS_1001_RETENCION = {
+        '23651501', '23651515', '23652001', '23652501', '23652502', '23652503',
+        '23652504', '23652535', '23653001', '23653002', '23653501',
+        '23654001', '23654002', '23670101',
+    }
 
     COLUMNAS_VALOR_2276 = COLUMNAS_FORMATO_2276[12:41]
     UBICACION_COLUMNAS_2276 = {
@@ -665,7 +670,9 @@ class DataProcessor:
             )
         ].copy()
         if df_1001.empty:
-            return pd.DataFrame(columns=self.COLUMNAS_FORMATO_1001)
+            return self._aplicar_retenciones_1001(
+                pd.DataFrame(columns=self.COLUMNAS_FORMATO_1001)
+            )
         self._enriquecer_ubicacion_contacto(df_1001)
 
         df_1001['Concepto'] = df_1001['codigo_parametro'].map(
@@ -715,8 +722,97 @@ class DataProcessor:
         df_1001['Retención en la fuente practicada IVA no domiciliados'] = 0.0
 
         resultado = df_1001[self.COLUMNAS_FORMATO_1001].reset_index(drop=True)
+        resultado = self._aplicar_retenciones_1001(resultado)
         print(f"[4/5] Datos procesados para 1001: {len(resultado)} filas")
         return resultado
+
+    def _aplicar_retenciones_1001(self, df_1001):
+        """
+        Aplica las cuentas de retencion (credito) del 1001 sobre la columna
+        'Retencion en la fuente practicada en renta' y unifica por NIT:
+        - Si el NIT ya tiene fila en df_1001: concatena la cuenta PUC en
+          'Codigo Cuentas Contables' y suma el credito en la columna S.
+        - Si el NIT no aparece: crea una fila huerfana solo con la retencion.
+        """
+        codigo_norm = self._serie_codigo_normalizado()
+        nit_raw = self._serie_nit_limpio()
+        tercero_raw = self._serie_texto(self.columnas['tercero'])
+        credito = self._serie_numerica(self.columnas['credito'])
+        descripcion_raw = self._serie_descripcion_limpia()
+
+        mascara_ret = (
+            codigo_norm.isin(self.CUENTAS_1001_RETENCION)
+            & (credito != 0)
+            & nit_raw.ne('')
+        )
+        if not mascara_ret.any():
+            return df_1001
+
+        df_ret = pd.DataFrame({
+            'codigo_puc': codigo_norm[mascara_ret].values,
+            'nit': nit_raw[mascara_ret].values,
+            'tercero': tercero_raw[mascara_ret].values,
+            'credito': credito[mascara_ret].values,
+            'descripcion': descripcion_raw[mascara_ret].values,
+        })
+
+        primer_indice = {}
+        if not df_1001.empty:
+            for idx in df_1001.index:
+                nit_val = df_1001.at[idx, 'Número identificación del informado']
+                if nit_val and nit_val not in primer_indice:
+                    primer_indice[nit_val] = idx
+
+        nuevas_filas = []
+        for nit, grupo in df_ret.groupby('nit', sort=False):
+            pucs = list(dict.fromkeys(grupo['codigo_puc'].tolist()))
+            total_credito = float(grupo['credito'].sum())
+
+            if nit in primer_indice:
+                idx = primer_indice[nit]
+                codigo_actual = str(df_1001.at[idx, 'Código Cuentas Contables'] or '')
+                codigos_existentes = [c.strip() for c in codigo_actual.split(',') if c.strip()]
+                for puc in pucs:
+                    if puc not in codigos_existentes:
+                        codigos_existentes.append(puc)
+                df_1001.at[idx, 'Código Cuentas Contables'] = ', '.join(codigos_existentes)
+                actual = df_1001.at[idx, 'Retención en la fuente practicada en renta']
+                actual = 0.0 if pd.isna(actual) else float(actual)
+                df_1001.at[idx, 'Retención en la fuente practicada en renta'] = actual + total_credito
+            else:
+                tercero = grupo['tercero'].iloc[0]
+                descripcion = grupo['descripcion'].iloc[0]
+                tipo_doc = self._inferir_tipo_documento(nit, tercero)
+                apellidos = self._dividir_nombre(tipo_doc, tercero)
+                nueva = {col: '' for col in self.COLUMNAS_FORMATO_1001}
+                nueva['Concepto'] = ''
+                nueva['Código Cuentas Contables'] = ', '.join(pucs)
+                nueva['Descripción'] = descripcion
+                nueva['Tipo documento'] = tipo_doc
+                nueva['Número identificación del informado'] = nit
+                nueva['Primer apellido del informado'] = apellidos[0]
+                nueva['Segundo apellido del informado'] = apellidos[1]
+                nueva['Primer nombre del informado'] = apellidos[2]
+                nueva['Otros nombres del informado'] = apellidos[3]
+                nueva['Razón social informado'] = apellidos[4]
+                for col_valor in (
+                    'Pago o abono en cuenta deducible',
+                    'Pago o abono en cuenta no deducible',
+                    'Iva mayor valor del costo o gasto deducible',
+                    'Iva mayor valor del costo o gasto no deducible',
+                    'Retención en la fuente asumida en renta',
+                    'Retención en la fuente practicada IVA responsables de IVA',
+                    'Retención en la fuente practicada IVA no domiciliados',
+                ):
+                    nueva[col_valor] = 0.0
+                nueva['Retención en la fuente practicada en renta'] = total_credito
+                nuevas_filas.append(nueva)
+
+        if nuevas_filas:
+            df_nuevas = pd.DataFrame(nuevas_filas, columns=self.COLUMNAS_FORMATO_1001)
+            df_1001 = pd.concat([df_1001, df_nuevas], ignore_index=True)
+
+        return df_1001
 
     def _procesar_formato_1005(self):
         """Construye el formato 1005 con la estructura esperada."""
